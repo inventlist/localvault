@@ -4,6 +4,8 @@ Zero-infrastructure secrets manager. Encrypted secrets stored locally, unlocked 
 
 No servers. No cloud. No config files to leak. Just encrypted files on disk.
 
+Part of [InventList Tools](https://inventlist.com/tools/localvault) — free, open-source developer utilities for indie builders.
+
 ## Install
 
 ### Homebrew (macOS)
@@ -37,20 +39,22 @@ sudo dnf install libsodium-devel
 # Create a vault (prompts for passphrase)
 localvault init
 
-# Store secrets
-localvault set DATABASE_URL "postgres://localhost/mydb"
-localvault set API_KEY "sk-1234567890"
+# Store any sensitive values — API keys, tokens, credentials, database URLs
+localvault set OPENAI_API_KEY "sk-proj-..."
+localvault set STRIPE_SECRET_KEY "sk_live_..."
+localvault set GITHUB_TOKEN "ghp_..."
 
 # Retrieve a secret (pipeable)
-localvault get DATABASE_URL
+localvault get OPENAI_API_KEY
 
 # List all keys
 localvault list
 
 # Export as shell variables
 localvault env
-# => export API_KEY="sk-1234567890"
-# => export DATABASE_URL="postgres://localhost/mydb"
+# => export GITHUB_TOKEN="ghp_..."
+# => export OPENAI_API_KEY="sk-proj-..."
+# => export STRIPE_SECRET_KEY="sk_live_..."
 
 # Run a command with secrets injected
 localvault exec -- rails server
