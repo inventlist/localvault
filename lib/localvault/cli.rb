@@ -109,6 +109,12 @@ module LocalVault
       abort_with "Wrong passphrase for vault '#{vault_name}'"
     end
 
+    desc "mcp", "Start MCP server (stdio)"
+    def mcp
+      require "localvault/mcp/server"
+      MCP::Server.new.start
+    end
+
     desc "version", "Print version"
     def version
       $stdout.puts "localvault #{VERSION}"

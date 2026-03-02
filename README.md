@@ -110,7 +110,14 @@ localvault vaults
 
 ## MCP Server (AI Agents)
 
-LocalVault includes an MCP server so AI agents (Claude Code, Cursor, etc.) can read secrets without seeing your passphrase.
+LocalVault includes an MCP server so AI coding agents can read and manage secrets via the Model Context Protocol — without ever seeing your passphrase.
+
+```bash
+# Unlock your vault first
+eval $(localvault unlock)
+```
+
+Then add to your MCP config (`.mcp.json`, `.cursor/mcp.json`, etc.):
 
 ```json
 {
@@ -119,14 +126,18 @@ LocalVault includes an MCP server so AI agents (Claude Code, Cursor, etc.) can r
       "command": "localvault",
       "args": ["mcp"],
       "env": {
-        "LOCALVAULT_SESSION": "your-session-token"
+        "LOCALVAULT_SESSION": "<your-session-token>"
       }
     }
   }
 }
 ```
 
-> MCP server implementation coming in v0.2.0.
+If you've already run `eval $(localvault unlock)` in your terminal, the agent inherits the session automatically — no need to paste the token.
+
+**Available tools:** `get_secret`, `list_secrets`, `set_secret`, `delete_secret`
+
+See [MCP Setup Guide](docs/site-docs/mcp-setup.md) for Claude Code and Cursor configuration details.
 
 ## Security
 
