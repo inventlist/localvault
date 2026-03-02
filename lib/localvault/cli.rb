@@ -131,6 +131,9 @@ module LocalVault
           return ""
         end
         IO.console&.getpass(msg) || $stdin.gets&.chomp || ""
+      rescue Interrupt
+        $stderr.puts
+        exit 130
       end
     end
 
