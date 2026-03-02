@@ -19,6 +19,7 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "thor", "~> 1.3"
   spec.add_dependency "rbnacl", "~> 7.1"
+  spec.add_dependency "base64"
 
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake", "~> 13.0"
