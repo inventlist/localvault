@@ -1,5 +1,12 @@
 #!/usr/bin/env ruby
-require_relative "../lib/localvault"
-require_relative "../lib/localvault/cli"
+
+# Support both development (require_relative) and installed (load path) usage
+begin
+  require_relative "../lib/localvault"
+rescue LoadError
+  require "localvault"
+end
+
+require "localvault/cli"
 
 LocalVault::CLI.start(ARGV)
