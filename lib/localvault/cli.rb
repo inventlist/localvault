@@ -1,6 +1,7 @@
 require "thor"
 require "io/console"
 require "base64"
+require "lipgloss"
 require_relative "session_cache"
 
 module LocalVault
@@ -220,6 +221,15 @@ module LocalVault
 
     private
 
+    # ── Lipgloss styles ────────────────────────────────────────────
+    HEADER_STYLE  = Lipgloss::Style.new.bold(true).foreground("#FFFFFF").background("#5C4AE4").padding(0, 1)
+    ODD_STYLE     = Lipgloss::Style.new.foreground("#E2E2E2").padding(0, 1)
+    EVEN_STYLE    = Lipgloss::Style.new.foreground("#A0A0A0").padding(0, 1)
+    MASKED_STYLE  = Lipgloss::Style.new.foreground("#6B7280").padding(0, 1)
+    GROUP_STYLE   = Lipgloss::Style.new.bold(true).foreground("#A78BFA")
+    VAULT_STYLE   = Lipgloss::Style.new.bold(true).foreground("#FFFFFF")
+    COUNT_STYLE   = Lipgloss::Style.new.foreground("#6B7280")
+
     def mask_value(value, reveal:)
       return value if reveal
       return "(empty)" if value.to_s.empty?
@@ -227,45 +237,51 @@ module LocalVault
       "#{"•" * 6}  #{suffix}"
     end
 
-    def render_table(secrets, vault_name, reveal:, header: nil)
-      key_width   = [secrets.keys.map(&:length).max || 0, 3].max
-      val_width   = reveal ? [secrets.values.map { |v| v.to_s.length }.max || 0, 5].max : 14
+    def lipgloss_table(secrets, reveal:)
+      require "lipgloss"
+      rows = secrets.sort.map { |k, v| [k, mask_value(v, reveal: reveal)] }
+      Lipgloss::Table.new
+        .headers(["Key", "Value"])
+        .rows(rows)
+        .border(:rounded)
+        .style_func(rows: rows.size, columns: 2) do |row, _col|
+          if row == Lipgloss::Table::HEADER_ROW
+            HEADER_STYLE
+          elsif reveal
+            row.odd? ? ODD_STYLE : EVEN_STYLE
+          else
+            row.odd? ? MASKED_STYLE : EVEN_STYLE
+          end
+        end
+        .render
+    end
 
+    def render_table(secrets, vault_name, reveal:, header: nil)
       unless header == false
         total = secrets.size
-        $stdout.puts header || "Vault: #{vault_name}  (#{total} secret#{total == 1 ? "" : "s"})"
+        label = "#{VAULT_STYLE.render("Vault: #{vault_name}")}  #{COUNT_STYLE.render("(#{total} secret#{total == 1 ? "" : "s"})")}"
+        $stdout.puts label
       end
-      divider = "┌#{"─" * (key_width + 2)}┬#{"─" * (val_width + 2)}┐"
-      row_div = "├#{"─" * (key_width + 2)}┼#{"─" * (val_width + 2)}┤"
-      bottom  = "└#{"─" * (key_width + 2)}┴#{"─" * (val_width + 2)}┘"
-
-      $stdout.puts divider
-      $stdout.puts "│ #{"Key".ljust(key_width)} │ #{"Value".ljust(val_width)} │"
-      $stdout.puts row_div
-      secrets.each do |key, value|
-        display = mask_value(value, reveal: reveal).to_s.ljust(val_width)
-        $stdout.puts "│ #{key.ljust(key_width)} │ #{display} │"
-      end
-      $stdout.puts bottom
+      $stdout.puts lipgloss_table(secrets, reveal: reveal)
     end
 
     def render_grouped_table(secrets, vault_name, reveal:)
-      groups = secrets.group_by { |k, _| k.include?("_") ? k.split("_").first : nil }
+      groups    = secrets.group_by { |k, _| k.include?("_") ? k.split("_").first : nil }
       ungrouped = groups.delete(nil) || []
+      total     = secrets.size
 
-      total = secrets.size
-      $stdout.puts "Vault: #{vault_name}  (#{total} secret#{total == 1 ? "" : "s"})"
+      $stdout.puts "#{VAULT_STYLE.render("Vault: #{vault_name}")}  #{COUNT_STYLE.render("(#{total} secret#{total == 1 ? "" : "s"})")}"
       $stdout.puts
 
       groups.sort.each do |prefix, pairs|
-        $stdout.puts "  #{prefix} (#{pairs.size})"
-        render_table(pairs.sort.to_h, vault_name, reveal: reveal, header: false)
+        $stdout.puts "  #{GROUP_STYLE.render("#{prefix}")}  #{COUNT_STYLE.render("(#{pairs.size})")}"
+        $stdout.puts lipgloss_table(pairs.sort.to_h, reveal: reveal)
         $stdout.puts
       end
 
       unless ungrouped.empty?
-        $stdout.puts "  (ungrouped)"
-        render_table(ungrouped.sort.to_h, vault_name, reveal: reveal, header: false)
+        $stdout.puts "  #{GROUP_STYLE.render("ungrouped")}"
+        $stdout.puts lipgloss_table(ungrouped.sort.to_h, reveal: reveal)
         $stdout.puts
       end
     end

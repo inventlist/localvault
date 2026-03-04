@@ -11,7 +11,7 @@ Gem::Specification.new do |spec|
   spec.homepage      = "https://github.com/inventlist/localvault"
   spec.license       = "MIT"
 
-  spec.required_ruby_version = ">= 3.1.0"
+  spec.required_ruby_version = ">= 3.2.0"
 
   spec.files         = Dir["lib/**/*", "bin/*", "LICENSE", "README.md"]
   spec.bindir        = "bin"
@@ -20,6 +20,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "thor", "~> 1.3"
   spec.add_dependency "rbnacl", "~> 7.1"
   spec.add_dependency "base64"
+  spec.add_dependency "lipgloss", "~> 0.2"
 
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake", "~> 13.0"
