@@ -32,10 +32,11 @@ module LocalVault
 
       FileUtils.mkdir_p(vault_path)
       meta = {
-        "name" => vault_name,
+        "name"       => vault_name,
         "created_at" => Time.now.utc.iso8601,
-        "version" => 1,
-        "salt" => Base64.strict_encode64(salt)
+        "version"    => 1,
+        "salt"       => Base64.strict_encode64(salt),
+        "count"      => 0
       }
       File.write(meta_path, YAML.dump(meta))
     end
@@ -49,6 +50,17 @@ module LocalVault
       m = meta
       return nil unless m && m["salt"]
       Base64.strict_decode64(m["salt"])
+    end
+
+    def count
+      meta&.dig("count") || 0
+    end
+
+    def update_count!(n)
+      m = meta
+      return unless m
+      m["count"] = n
+      File.write(meta_path, YAML.dump(m))
     end
 
     def read_encrypted

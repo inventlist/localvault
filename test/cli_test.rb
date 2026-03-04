@@ -159,13 +159,41 @@ class CLITest < Minitest::Test
 
   # --- vaults ---
 
-  def test_vaults_lists_all_with_default_marker
+  def test_vaults_lists_all_vault_names
     create_test_vault("default")
     create_test_vault("staging")
     out, = capture_io { LocalVault::CLI.start(%w[vaults]) }
-    assert_includes out, "default (default)"
+    assert_includes out, "default"
     assert_includes out, "staging"
-    refute_includes out, "staging (default)"
+  end
+
+  def test_vaults_marks_default_vault
+    create_test_vault("default")
+    create_test_vault("staging")
+    out, = capture_io { LocalVault::CLI.start(%w[vaults]) }
+    assert_includes out, "✓"       # default marker present
+    # staging is not the default, so no marker on that row only
+    lines = out.lines.select { |l| l.include?("staging") }
+    assert lines.none? { |l| l.include?("✓") }
+  end
+
+  def test_vaults_shows_secret_count
+    vault = create_test_vault("default")
+    vault.set("KEY_A", "val1")
+    vault.set("KEY_B", "val2")
+    out, = capture_io { LocalVault::CLI.start(%w[vaults]) }
+    assert_includes out, "2"
+  end
+
+  def test_vaults_shows_zero_count_for_empty_vault
+    create_test_vault("default")
+    out, = capture_io { LocalVault::CLI.start(%w[vaults]) }
+    assert_includes out, "0"
+  end
+
+  def test_vaults_shows_no_vaults_message_when_empty
+    out, = capture_io { LocalVault::CLI.start(%w[vaults]) }
+    assert_match(/no vaults/i, out)
   end
 
   # --- unlock ---

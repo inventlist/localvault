@@ -83,6 +83,7 @@ module LocalVault
       json = JSON.generate(secrets)
       encrypted = Crypto.encrypt(json, master_key)
       store.write_encrypted(encrypted)
+      store.update_count!(secrets.size)
     end
   end
 end

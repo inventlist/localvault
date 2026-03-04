@@ -80,13 +80,35 @@ module LocalVault
       Kernel.exec(env_hash, *cmd)
     end
 
-    desc "vaults", "List all vault names"
+    desc "vaults", "List all vaults with secret counts"
     def vaults
-      default_name = Config.default_vault
-      Store.list_vaults.each do |name|
-        marker = name == default_name ? " (default)" : ""
-        $stdout.puts "#{name}#{marker}"
+      names = Store.list_vaults
+      if names.empty?
+        $stdout.puts "No vaults found. Run: localvault init"
+        return
       end
+
+      default_name = Config.default_vault
+      rows = names.map do |name|
+        store = Store.new(name)
+        default_marker = name == default_name ? "✓" : ""
+        [name, store.count.to_s, default_marker]
+      end
+
+      table = Lipgloss::Table.new
+        .headers(["Vault", "Secrets", "Default"])
+        .rows(rows)
+        .border(:rounded)
+        .style_func(rows: rows.size, columns: 3) do |row, _col|
+          if row == Lipgloss::Table::HEADER_ROW
+            HEADER_STYLE
+          else
+            row.odd? ? ODD_STYLE : EVEN_STYLE
+          end
+        end
+        .render
+
+      $stdout.puts table
     end
 
     desc "unlock", "Output session token for passphrase-free access"
