@@ -55,7 +55,7 @@ module LocalVault
         "-a", vault_name,
         "-s", KEYCHAIN_SERVICE,
         "-w", payload,
-        "-T", "",          # no trusted apps beyond the owner
+        "-A",              # allow any app — no OS dialog on read (vault passphrase is the real security)
         out: File::NULL, err: File::NULL
       )
     end
