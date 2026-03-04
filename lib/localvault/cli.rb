@@ -131,6 +131,41 @@ module LocalVault
       end
     end
 
+    desc "rekey [NAME]", "Change the passphrase for a vault (secrets are preserved)"
+    def rekey(name = nil)
+      vault_name = name || resolve_vault_name
+      store = Store.new(vault_name)
+
+      unless store.exists?
+        abort_with "Vault '#{vault_name}' does not exist."
+        return
+      end
+
+      current = prompt_passphrase("Current passphrase: ")
+      vault   = Vault.open(name: vault_name, passphrase: current)
+      vault.all  # verify
+
+      new_pass = prompt_passphrase("New passphrase: ")
+      if new_pass.empty?
+        abort_with "Passphrase cannot be empty"
+        return
+      end
+
+      confirm = prompt_passphrase("Confirm new passphrase: ")
+      unless new_pass == confirm
+        abort_with "Passphrases do not match"
+        return
+      end
+
+      new_vault = vault.rekey(new_pass)
+      SessionCache.set(vault_name, new_vault.master_key)
+      $stdout.puts "Passphrase updated for vault '#{vault_name}'."
+    rescue Crypto::DecryptionError
+      abort_with "Wrong passphrase for vault '#{vault_name}'"
+    rescue RuntimeError => e
+      abort_with e.message
+    end
+
     desc "reset [NAME]", "Destroy all secrets in a vault and reinitialize it"
     def reset(name = nil)
       vault_name = name || resolve_vault_name

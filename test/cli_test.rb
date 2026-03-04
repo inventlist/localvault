@@ -229,6 +229,72 @@ class CLITest < Minitest::Test
     end
   end
 
+  # --- rekey ---
+
+  def test_rekey_changes_passphrase_and_preserves_secrets
+    vault = create_test_vault("default")
+    vault.set("API_KEY", "sk-abc123")
+    vault.set("DB_URL",  "postgres://localhost/myapp")
+
+    call_count = 0
+    inputs = [test_passphrase, "newpass", "newpass"]
+    stub_rekey_inputs(inputs) do
+      out, = capture_io { LocalVault::CLI.start(%w[rekey]) }
+      assert_match(/Passphrase updated/, out)
+    end
+
+    # old passphrase fails
+    assert_raises(LocalVault::Crypto::DecryptionError) do
+      LocalVault::Vault.open(name: "default", passphrase: test_passphrase).all
+    end
+
+    # new passphrase works and secrets preserved
+    new_vault = LocalVault::Vault.open(name: "default", passphrase: "newpass")
+    assert_equal "sk-abc123",           new_vault.get("API_KEY")
+    assert_equal "postgres://localhost/myapp", new_vault.get("DB_URL")
+  end
+
+  def test_rekey_rejects_wrong_current_passphrase
+    create_test_vault("default")
+    inputs = ["wrongpass", "newpass", "newpass"]
+    stub_rekey_inputs(inputs) do
+      _, err = capture_io { LocalVault::CLI.start(%w[rekey]) }
+      assert_match(/Wrong passphrase/, err)
+    end
+  end
+
+  def test_rekey_rejects_empty_new_passphrase
+    create_test_vault("default")
+    inputs = [test_passphrase, "", ""]
+    stub_rekey_inputs(inputs) do
+      _, err = capture_io { LocalVault::CLI.start(%w[rekey]) }
+      assert_match(/Passphrase cannot be empty/, err)
+    end
+  end
+
+  def test_rekey_rejects_mismatched_new_passphrase
+    create_test_vault("default")
+    inputs = [test_passphrase, "newpass", "different"]
+    stub_rekey_inputs(inputs) do
+      _, err = capture_io { LocalVault::CLI.start(%w[rekey]) }
+      assert_match(/Passphrases do not match/, err)
+    end
+  end
+
+  def test_rekey_named_vault
+    vault = create_test_vault("staging")
+    vault.set("TOKEN", "tok-xyz")
+
+    inputs = [test_passphrase, "newpass", "newpass"]
+    stub_rekey_inputs(inputs) do
+      out, = capture_io { LocalVault::CLI.start(%w[rekey staging]) }
+      assert_match(/Passphrase updated/, out)
+    end
+
+    new_vault = LocalVault::Vault.open(name: "staging", passphrase: "newpass")
+    assert_equal "tok-xyz", new_vault.get("TOKEN")
+  end
+
   # --- show ---
 
   def test_show_renders_table_with_masked_values
@@ -397,6 +463,16 @@ class CLITest < Minitest::Test
 
   def stub_passphrase(passphrase)
     stub_getpass(-> { passphrase }) { yield }
+  end
+
+  # Stubs rekey: all three inputs are passphrase prompts (current, new, confirm)
+  def stub_rekey_inputs(inputs)
+    idx = 0
+    orig = LocalVault::CLI.instance_method(:prompt_passphrase)
+    LocalVault::CLI.send(:define_method, :prompt_passphrase) { |_msg = ""| inputs[idx].tap { idx += 1 } }
+    yield
+  ensure
+    LocalVault::CLI.send(:define_method, :prompt_passphrase, orig)
   end
 
   # Stubs reset: first input is confirmation (via $stdin), rest are passphrase prompts

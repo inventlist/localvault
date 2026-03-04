@@ -71,6 +71,16 @@ module LocalVault
       raise
     end
 
+    def create_meta!(salt:)
+      meta = {
+        "name"       => vault_name,
+        "created_at" => meta&.dig("created_at") || Time.now.utc.iso8601,
+        "version"    => 1,
+        "salt"       => Base64.strict_encode64(salt)
+      }
+      File.write(meta_path, YAML.dump(meta))
+    end
+
     def destroy!
       FileUtils.rm_rf(vault_path)
     end

@@ -56,6 +56,16 @@ module LocalVault
       new(name: name, master_key: master_key)
     end
 
+    def rekey(new_passphrase, new_salt: Crypto.generate_salt)
+      secrets = all
+      new_master_key = Crypto.derive_master_key(new_passphrase, new_salt)
+
+      store.create_meta!(salt: new_salt)
+      new_vault = self.class.new(name: name, master_key: new_master_key)
+      new_vault.send(:write_secrets, secrets)
+      new_vault
+    end
+
     def self.open(name:, passphrase:)
       store = Store.new(name)
       raise "Vault '#{name}' does not exist" unless store.exists?
