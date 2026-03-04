@@ -229,6 +229,49 @@ class CLITest < Minitest::Test
     end
   end
 
+  # --- reset ---
+
+  def test_reset_destroys_vault_and_reinitializes
+    vault = create_test_vault("default")
+    vault.set("SECRET", "gone")
+
+    call_count = 0
+    inputs = ["default", "newpass", "newpass"]
+    stub_reset_inputs(inputs) do
+      out, = capture_io { LocalVault::CLI.start(%w[reset]) }
+      assert_match(/Vault 'default' has been reset/, out)
+    end
+
+    new_vault = LocalVault::Vault.open(name: "default", passphrase: "newpass")
+    assert_nil new_vault.get("SECRET")
+  end
+
+  def test_reset_requires_vault_name_confirmation
+    create_test_vault("default")
+
+    inputs = ["wrong", "newpass", "newpass"]
+    stub_reset_inputs(inputs) do
+      _, err = capture_io { LocalVault::CLI.start(%w[reset]) }
+      assert_match(/Cancelled/, err)
+      assert LocalVault::Store.new("default").exists?
+    end
+  end
+
+  def test_reset_errors_if_vault_does_not_exist
+    _, err = capture_io { LocalVault::CLI.start(%w[reset]) }
+    assert_match(/does not exist/, err)
+  end
+
+  def test_reset_named_vault
+    create_test_vault("staging")
+
+    inputs = ["staging", "newpass", "newpass"]
+    stub_reset_inputs(inputs) do
+      out, = capture_io { LocalVault::CLI.start(%w[reset staging]) }
+      assert_match(/Vault 'staging' has been reset/, out)
+    end
+  end
+
   # --- exec ---
 
   def test_exec_injects_env_vars
@@ -274,6 +317,19 @@ class CLITest < Minitest::Test
 
   def stub_passphrase(passphrase)
     stub_getpass(-> { passphrase }) { yield }
+  end
+
+  # Stubs reset: first input is confirmation (via $stdin), rest are passphrase prompts
+  def stub_reset_inputs(inputs)
+    input_index = 0
+    original_gets = LocalVault::CLI.instance_method(:prompt_confirmation)
+    original_pass = LocalVault::CLI.instance_method(:prompt_passphrase)
+    LocalVault::CLI.send(:define_method, :prompt_confirmation) { |_msg = ""| inputs[input_index].tap { input_index += 1 } }
+    LocalVault::CLI.send(:define_method, :prompt_passphrase) { |_msg = ""| inputs[input_index].tap { input_index += 1 } }
+    yield
+  ensure
+    LocalVault::CLI.send(:define_method, :prompt_confirmation, original_gets)
+    LocalVault::CLI.send(:define_method, :prompt_passphrase, original_pass)
   end
 
   def stub_getpass(callable)

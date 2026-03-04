@@ -71,6 +71,10 @@ module LocalVault
       raise
     end
 
+    def destroy!
+      FileUtils.rm_rf(vault_path)
+    end
+
     def self.list_vaults
       vaults_dir = Config.vaults_path
       return [] unless File.directory?(vaults_dir)

@@ -109,6 +109,48 @@ module LocalVault
       abort_with "Wrong passphrase for vault '#{vault_name}'"
     end
 
+    desc "reset [NAME]", "Destroy all secrets in a vault and reinitialize it"
+    def reset(name = nil)
+      vault_name = name || resolve_vault_name
+      store = Store.new(vault_name)
+
+      unless store.exists?
+        abort_with "Vault '#{vault_name}' does not exist. Run: localvault init #{vault_name}"
+        return
+      end
+
+      $stderr.puts "WARNING: This will permanently delete all secrets in vault '#{vault_name}'."
+      $stderr.puts "This cannot be undone."
+      $stderr.print "Type '#{vault_name}' to confirm: "
+
+      confirmation = prompt_confirmation
+      unless confirmation == vault_name
+        abort_with "Cancelled."
+        return
+      end
+
+      store.destroy!
+
+      passphrase = prompt_passphrase("New passphrase: ")
+      if passphrase.empty?
+        abort_with "Passphrase cannot be empty"
+        return
+      end
+
+      confirm = prompt_passphrase("Confirm passphrase: ")
+      unless passphrase == confirm
+        abort_with "Passphrases do not match"
+        return
+      end
+
+      salt = Crypto.generate_salt
+      master_key = Crypto.derive_master_key(passphrase, salt)
+      Vault.create!(name: vault_name, master_key: master_key, salt: salt)
+      $stdout.puts "Vault '#{vault_name}' has been reset."
+    rescue RuntimeError => e
+      abort_with e.message
+    end
+
     desc "mcp", "Start MCP server (stdio)"
     def mcp
       require "localvault/mcp/server"
@@ -125,6 +167,13 @@ module LocalVault
     end
 
     no_commands do
+      def prompt_confirmation(msg = "")
+        $stdin.gets&.chomp || ""
+      rescue Interrupt
+        $stderr.puts
+        exit 130
+      end
+
       def prompt_passphrase(msg = "Passphrase: ")
         unless $stdin.respond_to?(:getpass) || ($stdin.respond_to?(:tty?) && $stdin.tty?)
           abort_with "Use LOCALVAULT_SESSION or run in a terminal"
