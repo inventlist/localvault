@@ -1,6 +1,7 @@
 require "thor"
 require "io/console"
 require "base64"
+require_relative "session_cache"
 
 module LocalVault
   class CLI < Thor
@@ -103,6 +104,7 @@ module LocalVault
       vault = Vault.new(name: vault_name, master_key: master_key)
       vault.all
 
+      SessionCache.set(vault_name, master_key)
       token = Base64.strict_encode64("#{vault_name}:#{Base64.strict_encode64(master_key)}")
       $stdout.puts "export LOCALVAULT_SESSION=\"#{token}\""
     rescue Crypto::DecryptionError
@@ -168,6 +170,17 @@ module LocalVault
       $stdout.puts "Vault '#{vault_name}' has been reset."
     rescue RuntimeError => e
       abort_with e.message
+    end
+
+    desc "lock [NAME]", "Clear cached passphrase for a vault (or all vaults)"
+    def lock(name = nil)
+      if name
+        SessionCache.clear(name)
+        $stdout.puts "Session cleared for vault '#{name}'."
+      else
+        SessionCache.clear_all
+        $stdout.puts "All vault sessions cleared."
+      end
     end
 
     desc "mcp", "Start MCP server (stdio)"
@@ -264,7 +277,7 @@ module LocalVault
     def open_vault!
       vault_name = resolve_vault_name
 
-      # Try session cache first
+      # 1. Try LOCALVAULT_SESSION env var
       if (vault = vault_from_session(vault_name))
         return vault
       end
@@ -275,9 +288,22 @@ module LocalVault
         raise SystemExit.new(1)
       end
 
+      # 2. Try Keychain session cache
+      if (master_key = SessionCache.get(vault_name))
+        begin
+          vault = Vault.new(name: vault_name, master_key: master_key)
+          vault.all  # verify key still valid
+          return vault
+        rescue Crypto::DecryptionError
+          SessionCache.clear(vault_name)  # stale cache — clear and fall through
+        end
+      end
+
+      # 3. Prompt passphrase and cache the result
       passphrase = prompt_passphrase("Passphrase: ")
       vault = Vault.open(name: vault_name, passphrase: passphrase)
-      vault.all # Eager verification
+      vault.all  # eager verification
+      SessionCache.set(vault_name, vault.master_key)
       vault
     rescue Crypto::DecryptionError
       abort_with "Wrong passphrase for vault '#{vault_name}'"
