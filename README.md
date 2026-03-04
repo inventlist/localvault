@@ -97,20 +97,38 @@ The session token is stored in `LOCALVAULT_SESSION` and contains the derived mas
 
 ## Multiple Vaults
 
+Separate secrets by project, environment, or service — each vault has its own passphrase and encryption:
+
 ```bash
-# Create separate vaults for different environments
+# Create separate vaults
 localvault init production
 localvault init staging
+localvault init x          # all X / Twitter API credentials
 
 # Use --vault to target a specific vault
 localvault set API_KEY "sk-prod-xxx" --vault production
 localvault set API_KEY "sk-staging-xxx" --vault staging
+
+# Store multiple X accounts in one vault using handle-prefixed keys
+localvault set MYHANDLE_API_KEY        "..." --vault x
+localvault set MYHANDLE_API_SECRET     "..." --vault x
+localvault set MYHANDLE_ACCESS_TOKEN   "..." --vault x
+localvault set MYHANDLE_ACCESS_SECRET  "..." --vault x
+localvault set MYHANDLE_BEARER_TOKEN   "..." --vault x
+
+localvault set MYBRAND_API_KEY         "..." --vault x
+localvault set MYBRAND_ACCESS_TOKEN    "..." --vault x
 
 # List all vaults
 localvault vaults
 # => default (default)
 # => production
 # => staging
+# => x
+
+# Unlock a specific vault for a session
+eval $(localvault unlock --vault x)
+localvault exec --vault x -- ruby scripts/post.rb
 ```
 
 ## Resetting a Vault
