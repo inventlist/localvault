@@ -109,6 +109,25 @@ module LocalVault
       abort_with "Wrong passphrase for vault '#{vault_name}'"
     end
 
+    desc "show", "Display secrets in a table (masked by default)"
+    method_option :group,  type: :boolean, default: false, desc: "Group by key prefix"
+    method_option :reveal, type: :boolean, default: false, desc: "Show full values instead of masking"
+    def show
+      vault = open_vault!
+      secrets = vault.all
+
+      if secrets.empty?
+        $stdout.puts "No secrets in vault '#{vault.name}'."
+        return
+      end
+
+      if options[:group]
+        render_grouped_table(secrets, vault.name, reveal: options[:reveal])
+      else
+        render_table(secrets.sort.to_h, vault.name, reveal: options[:reveal])
+      end
+    end
+
     desc "reset [NAME]", "Destroy all secrets in a vault and reinitialize it"
     def reset(name = nil)
       vault_name = name || resolve_vault_name
@@ -187,6 +206,56 @@ module LocalVault
     end
 
     private
+
+    def mask_value(value, reveal:)
+      return value if reveal
+      return "(empty)" if value.to_s.empty?
+      suffix = value.to_s.length > 4 ? value.to_s[-4..] : value.to_s
+      "#{"•" * 6}  #{suffix}"
+    end
+
+    def render_table(secrets, vault_name, reveal:, header: nil)
+      key_width   = [secrets.keys.map(&:length).max || 0, 3].max
+      val_width   = reveal ? [secrets.values.map { |v| v.to_s.length }.max || 0, 5].max : 14
+
+      unless header == false
+        total = secrets.size
+        $stdout.puts header || "Vault: #{vault_name}  (#{total} secret#{total == 1 ? "" : "s"})"
+      end
+      divider = "┌#{"─" * (key_width + 2)}┬#{"─" * (val_width + 2)}┐"
+      row_div = "├#{"─" * (key_width + 2)}┼#{"─" * (val_width + 2)}┤"
+      bottom  = "└#{"─" * (key_width + 2)}┴#{"─" * (val_width + 2)}┘"
+
+      $stdout.puts divider
+      $stdout.puts "│ #{"Key".ljust(key_width)} │ #{"Value".ljust(val_width)} │"
+      $stdout.puts row_div
+      secrets.each do |key, value|
+        display = mask_value(value, reveal: reveal).to_s.ljust(val_width)
+        $stdout.puts "│ #{key.ljust(key_width)} │ #{display} │"
+      end
+      $stdout.puts bottom
+    end
+
+    def render_grouped_table(secrets, vault_name, reveal:)
+      groups = secrets.group_by { |k, _| k.include?("_") ? k.split("_").first : nil }
+      ungrouped = groups.delete(nil) || []
+
+      total = secrets.size
+      $stdout.puts "Vault: #{vault_name}  (#{total} secret#{total == 1 ? "" : "s"})"
+      $stdout.puts
+
+      groups.sort.each do |prefix, pairs|
+        $stdout.puts "  #{prefix} (#{pairs.size})"
+        render_table(pairs.sort.to_h, vault_name, reveal: reveal, header: false)
+        $stdout.puts
+      end
+
+      unless ungrouped.empty?
+        $stdout.puts "  (ungrouped)"
+        render_table(ungrouped.sort.to_h, vault_name, reveal: reveal, header: false)
+        $stdout.puts
+      end
+    end
 
     def resolve_vault_name
       options[:vault] || Config.default_vault

@@ -229,6 +229,86 @@ class CLITest < Minitest::Test
     end
   end
 
+  # --- show ---
+
+  def test_show_renders_table_with_masked_values
+    vault = create_test_vault("default")
+    vault.set("OPENAI_API_KEY", "sk-proj-abc123")
+    vault.set("STRIPE_SECRET_KEY", "sk_live_xyz789")
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[show]) }
+      assert_includes out, "OPENAI_API_KEY"
+      assert_includes out, "STRIPE_SECRET_KEY"
+      assert_includes out, "123"   # last chars of sk-proj-abc123
+      assert_includes out, "789"   # last chars of sk_live_xyz789
+      refute_includes out, "sk-proj-abc123"
+      refute_includes out, "sk_live_xyz789"
+    end
+  end
+
+  def test_show_empty_vault
+    create_test_vault("default")
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[show]) }
+      assert_match(/No secrets/, out)
+    end
+  end
+
+  def test_show_group_splits_by_prefix
+    vault = create_test_vault("default")
+    vault.set("MYHANDLE_API_KEY", "key-aaa111")
+    vault.set("MYHANDLE_ACCESS_TOKEN", "tok-bbb222")
+    vault.set("MYBRAND_API_KEY", "key-ccc333")
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[show --group]) }
+      assert out.index("MYBRAND") < out.index("MYHANDLE")  # alphabetical groups
+      assert_includes out, "MYHANDLE_API_KEY"
+      assert_includes out, "MYBRAND_API_KEY"
+    end
+  end
+
+  def test_show_group_ungrouped_keys_shown_last
+    vault = create_test_vault("default")
+    vault.set("PLAIN", "value123")
+    vault.set("MYHANDLE_API_KEY", "key-aaa111")
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[show --group]) }
+      assert_includes out, "PLAIN"
+      assert_includes out, "MYHANDLE_API_KEY"
+    end
+  end
+
+  def test_show_named_vault
+    vault = create_test_vault("x")
+    vault.set("MYHANDLE_API_KEY", "key-abc789")
+    with_session("x") do
+      out, = capture_io { LocalVault::CLI.start(%w[show --vault x]) }
+      assert_includes out, "MYHANDLE_API_KEY"
+      assert_includes out, "789"
+      refute_includes out, "key-abc789"
+    end
+  end
+
+  def test_show_reveal_exposes_full_values
+    vault = create_test_vault("default")
+    vault.set("OPENAI_API_KEY", "sk-proj-abc123")
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[show --reveal]) }
+      assert_includes out, "sk-proj-abc123"
+    end
+  end
+
+  def test_show_reveal_with_group
+    vault = create_test_vault("default")
+    vault.set("MYHANDLE_API_KEY", "key-full-value")
+    vault.set("MYHANDLE_ACCESS_TOKEN", "tok-full-value")
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[show --group --reveal]) }
+      assert_includes out, "key-full-value"
+      assert_includes out, "tok-full-value"
+    end
+  end
+
   # --- reset ---
 
   def test_reset_destroys_vault_and_reinitializes
