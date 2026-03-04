@@ -74,6 +74,7 @@ localvault exec -- node app.js
 | `exec -- CMD` | Run a command with all secrets as env vars |
 | `vaults` | List all vaults |
 | `unlock` | Output a session token for passphrase-free access |
+| `reset [NAME]` | Destroy all secrets and reinitialize with a new passphrase |
 | `version` | Print version |
 
 All vault commands accept `--vault NAME` (or `-v NAME`) to target a specific vault. Defaults to `default`.
@@ -111,6 +112,22 @@ localvault vaults
 # => production
 # => staging
 ```
+
+## Resetting a Vault
+
+Forgot your passphrase? Use `reset` to destroy all secrets and start fresh with a new one:
+
+```bash
+localvault reset
+# WARNING: This will permanently delete all secrets in vault 'default'.
+# This cannot be undone.
+# Type 'default' to confirm: default
+# New passphrase:
+# Confirm passphrase:
+# Vault 'default' has been reset.
+```
+
+Works on named vaults too: `localvault reset production`. All secrets are gone — there is no recovery.
 
 ## MCP Server (AI Agents)
 
