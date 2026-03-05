@@ -247,6 +247,44 @@ module LocalVault
       MCP::Server.new.start
     end
 
+    desc "demo", "Create demo vaults with fake data for learning (passphrase: demo)"
+    def demo
+      names = Store.list_vaults
+      unless names.empty?
+        abort_with "Vaults already exist (#{names.join(", ")}). " \
+                   "Run `localvault reset <name>` to clear one, or use a fresh LOCALVAULT_HOME."
+        return
+      end
+
+      $stderr.puts "This creates DEMO vaults with fake data for learning purposes."
+      $stderr.puts "These are NOT for real secrets. Passphrase for all vaults: \"demo\""
+      $stderr.print "Type 'demo' to continue: "
+
+      confirmation = prompt_confirmation
+      unless confirmation == "demo"
+        abort_with "Cancelled."
+        return
+      end
+
+      DEMO_DATA.each do |vault_name, secrets|
+        salt       = Crypto.generate_salt
+        master_key = Crypto.derive_master_key("demo", salt)
+        vault      = Vault.create!(name: vault_name, master_key: master_key, salt: salt)
+        secrets.each { |k, v| vault.set(k, v) }
+        $stdout.puts "  created vault '#{vault_name}' (#{secrets.size} secrets)"
+      end
+
+      $stdout.puts
+      $stdout.puts "Done! All vaults use passphrase: demo"
+      $stdout.puts
+      $stdout.puts "Try:"
+      $stdout.puts "  localvault vaults"
+      $stdout.puts "  localvault show"
+      $stdout.puts "  localvault show --vault x --group"
+      $stdout.puts "  localvault show --vault production --reveal"
+      $stdout.puts "  localvault exec -- env | grep -E 'DATABASE|REDIS'"
+    end
+
     desc "version", "Print version"
     def version
       $stdout.puts "localvault #{VERSION}"
@@ -277,6 +315,52 @@ module LocalVault
     end
 
     private
+
+    # ── Demo data ──────────────────────────────────────────────────
+    DEMO_DATA = {
+      "default" => {
+        "OPENAI_API_KEY"        => "sk-demo-openai-abc123",
+        "ANTHROPIC_API_KEY"     => "sk-ant-demo-xyz789",
+        "STRIPE_SECRET_KEY"     => "sk_test_demo_stripe",
+        "STRIPE_WEBHOOK_SECRET" => "whsec_demo_webhook",
+        "RESEND_API_KEY"        => "re_demo_resend_key",
+        "GITHUB_TOKEN"          => "ghp_demo_github_token",
+        "SENTRY_DSN"            => "https://demo@sentry.io/12345",
+        "DATABASE_URL"          => "postgres://localhost/myapp_dev"
+      },
+      "x" => {
+        "NAUMANTHANVI_API_KEY"         => "demo-api-key-personal",
+        "NAUMANTHANVI_API_SECRET"      => "demo-api-secret-personal",
+        "NAUMANTHANVI_ACCESS_TOKEN"    => "demo-access-token-personal",
+        "NAUMANTHANVI_ACCESS_SECRET"   => "demo-access-secret-personal",
+        "NAUMANTHANVI_BEARER_TOKEN"    => "demo-bearer-personal",
+        "INVENT_LIST_API_KEY"          => "demo-api-key-brand",
+        "INVENT_LIST_API_SECRET"       => "demo-api-secret-brand",
+        "INVENT_LIST_ACCESS_TOKEN"     => "demo-access-token-brand",
+        "INVENT_LIST_ACCESS_SECRET"    => "demo-access-secret-brand",
+        "INVENT_LIST_BEARER_TOKEN"     => "demo-bearer-brand"
+      },
+      "production" => {
+        "DATABASE_URL"            => "postgres://prod-db.example.com/myapp",
+        "REDIS_URL"               => "redis://prod-redis.example.com:6379",
+        "SECRET_KEY_BASE"         => "demo-secret-key-base-very-long-string",
+        "RAILS_MASTER_KEY"        => "demo-master-key-32chars-exactly!",
+        "AWS_ACCESS_KEY_ID"       => "AKIADEMO0000000000",
+        "AWS_SECRET_ACCESS_KEY"   => "demo-aws-secret-access-key",
+        "S3_BUCKET"               => "myapp-production",
+        "CLOUDFLARE_API_TOKEN"    => "demo-cloudflare-token",
+        "KAMAL_REGISTRY_PASSWORD" => "demo-registry-password"
+      },
+      "staging" => {
+        "DATABASE_URL"            => "postgres://staging-db.example.com/myapp",
+        "REDIS_URL"               => "redis://staging-redis.example.com:6379",
+        "SECRET_KEY_BASE"         => "demo-staging-secret-key-base",
+        "RAILS_MASTER_KEY"        => "demo-staging-master-key-32ch!",
+        "STRIPE_SECRET_KEY"       => "sk_test_demo_staging_stripe",
+        "STRIPE_WEBHOOK_SECRET"   => "whsec_demo_staging_webhook",
+        "S3_BUCKET"               => "myapp-staging"
+      }
+    }.freeze
 
     # ── Lipgloss styles ────────────────────────────────────────────
     HEADER_STYLE  = Lipgloss::Style.new.bold(true).foreground("#FFFFFF").background("#5C4AE4").padding(0, 1)

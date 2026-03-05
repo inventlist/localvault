@@ -196,6 +196,58 @@ class CLITest < Minitest::Test
     assert_match(/no vaults/i, out)
   end
 
+  # --- demo ---
+
+  def test_demo_creates_four_vaults
+    stub_demo_confirm("demo") do
+      capture_io { LocalVault::CLI.start(%w[demo]) }
+    end
+    assert LocalVault::Store.new("default").exists?
+    assert LocalVault::Store.new("x").exists?
+    assert LocalVault::Store.new("production").exists?
+    assert LocalVault::Store.new("staging").exists?
+  end
+
+  def test_demo_populates_secrets
+    stub_demo_confirm("demo") do
+      capture_io { LocalVault::CLI.start(%w[demo]) }
+    end
+    store = LocalVault::Store.new("default")
+    assert store.count > 0
+  end
+
+  def test_demo_vaults_openable_with_demo_passphrase
+    stub_demo_confirm("demo") do
+      capture_io { LocalVault::CLI.start(%w[demo]) }
+    end
+    vault = LocalVault::Vault.open(name: "default", passphrase: "demo")
+    assert vault.get("OPENAI_API_KEY")
+  end
+
+  def test_demo_cancelled_when_wrong_confirmation
+    stub_demo_confirm("nope") do
+      _, err = capture_io { LocalVault::CLI.start(%w[demo]) }
+      assert_match(/cancelled/i, err)
+    end
+    refute LocalVault::Store.new("default").exists?
+  end
+
+  def test_demo_aborts_if_vaults_already_exist
+    create_test_vault("default")
+    stub_demo_confirm("demo") do
+      _, err = capture_io { LocalVault::CLI.start(%w[demo]) }
+      assert_match(/already exist/i, err)
+    end
+  end
+
+  def test_demo_outputs_next_steps
+    stub_demo_confirm("demo") do
+      out, = capture_io { LocalVault::CLI.start(%w[demo]) }
+      assert_match(/localvault vaults/, out)
+      assert_match(/localvault show/, out)
+    end
+  end
+
   # --- unlock ---
 
   def test_unlock_outputs_session_export
@@ -522,5 +574,13 @@ class CLITest < Minitest::Test
     yield
   ensure
     LocalVault::CLI.send(:define_method, :prompt_passphrase, original)
+  end
+
+  def stub_demo_confirm(input)
+    original = LocalVault::CLI.instance_method(:prompt_confirmation)
+    LocalVault::CLI.send(:define_method, :prompt_confirmation) { |_msg = ""| input }
+    yield
+  ensure
+    LocalVault::CLI.send(:define_method, :prompt_confirmation, original)
   end
 end
