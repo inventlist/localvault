@@ -59,4 +59,41 @@ class ConfigTest < Minitest::Test
     content = File.read(LocalVault::Config.config_path)
     assert_match(/key.*value/, content)
   end
+
+  def test_token_nil_by_default
+    assert_nil LocalVault::Config.token
+  end
+
+  def test_set_and_get_token
+    LocalVault::Config.token = "test-token-123"
+    assert_equal "test-token-123", LocalVault::Config.token
+  end
+
+  def test_inventlist_handle_nil_by_default
+    assert_nil LocalVault::Config.inventlist_handle
+  end
+
+  def test_set_and_get_inventlist_handle
+    LocalVault::Config.inventlist_handle = "nauman"
+    assert_equal "nauman", LocalVault::Config.inventlist_handle
+  end
+
+  def test_api_url_defaults_to_inventlist
+    assert_equal "https://inventlist.com", LocalVault::Config.api_url
+  end
+
+  def test_set_and_get_api_url
+    LocalVault::Config.api_url = "http://localhost:3004"
+    assert_equal "http://localhost:3004", LocalVault::Config.api_url
+  end
+
+  def test_settings_persist_independently
+    LocalVault::Config.token = "my-token"
+    LocalVault::Config.inventlist_handle = "myhandle"
+    LocalVault::Config.default_vault = "prod"
+
+    assert_equal "my-token",  LocalVault::Config.token
+    assert_equal "myhandle",  LocalVault::Config.inventlist_handle
+    assert_equal "prod",      LocalVault::Config.default_vault
+  end
 end

@@ -46,5 +46,35 @@ module LocalVault
       FileUtils.mkdir_p(vaults_path)
       FileUtils.mkdir_p(keys_path)
     end
+
+    def self.token
+      load["token"]
+    end
+
+    def self.token=(t)
+      data = load
+      data["token"] = t
+      save(data)
+    end
+
+    def self.inventlist_handle
+      load["inventlist_handle"]
+    end
+
+    def self.inventlist_handle=(h)
+      data = load
+      data["inventlist_handle"] = h
+      save(data)
+    end
+
+    def self.api_url
+      load.fetch("api_url", "https://inventlist.com")
+    end
+
+    def self.api_url=(url)
+      data = load
+      data["api_url"] = url
+      save(data)
+    end
   end
 end

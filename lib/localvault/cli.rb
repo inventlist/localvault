@@ -285,6 +285,150 @@ module LocalVault
       $stdout.puts "  localvault exec -- env | grep -E 'DATABASE|REDIS'"
     end
 
+    # ── Teams / sharing ──────────────────────────────────────────────
+
+    require_relative "cli/keys"
+    require_relative "cli/team"
+
+    register(Keys, "keys", "keys SUBCOMMAND", "Manage your X25519 keypair for vault sharing")
+    register(Team, "team", "team SUBCOMMAND", "Manage vault team access")
+
+    desc "connect", "Connect to InventList for vault sharing"
+    method_option :token,  required: true, type: :string, desc: "InventList API token"
+    method_option :handle, required: true, type: :string, desc: "Your InventList handle"
+    def connect
+      Config.token              = options[:token]
+      Config.inventlist_handle  = options[:handle]
+      $stdout.puts "Connected as @#{options[:handle]}"
+      $stdout.puts
+      $stdout.puts "Next steps:"
+      $stdout.puts "  localvault keys generate   # generate your X25519 keypair"
+      $stdout.puts "  localvault keys publish    # upload your public key to InventList"
+    end
+
+    desc "share [VAULT]", "Share a vault with an InventList user, team, or crew"
+    method_option :with, required: true, type: :string,
+      desc: "Recipient: @handle, team:HANDLE, or crew:SLUG"
+    def share(vault_name = nil)
+      unless Config.token
+        abort_with "Not connected. Run: localvault connect --token TOKEN --handle HANDLE"
+        return
+      end
+
+      unless Identity.exists?
+        abort_with "No keypair found. Run: localvault keys generate && localvault keys publish"
+        return
+      end
+
+      vault_name ||= resolve_vault_name
+      vault   = open_vault_by_name!(vault_name)
+      secrets = vault.all
+
+      if secrets.empty?
+        abort_with "Vault '#{vault_name}' has no secrets to share."
+        return
+      end
+
+      client     = ApiClient.new(token: Config.token)
+      target     = options[:with]
+      recipients = resolve_recipients(client, target)
+
+      if recipients.empty?
+        abort_with "No recipients with public keys found for '#{target}'"
+        return
+      end
+
+      recipients.each do |handle, pub_key|
+        encrypted = ShareCrypto.encrypt_for(secrets, pub_key)
+        client.create_share(
+          vault_name:        vault_name,
+          recipient_handle:  handle,
+          encrypted_payload: encrypted
+        )
+        $stdout.puts "Shared vault '#{vault_name}' with @#{handle}"
+      end
+    rescue ApiClient::ApiError => e
+      abort_with e.message
+    end
+
+    desc "receive", "Fetch and import vaults shared with you"
+    def receive
+      unless Config.token
+        abort_with "Not connected. Run: localvault connect --token TOKEN --handle HANDLE"
+        return
+      end
+
+      unless Identity.private_key_bytes
+        abort_with "No keypair found. Run: localvault keys generate"
+        return
+      end
+
+      client  = ApiClient.new(token: Config.token)
+      result  = client.pending_shares
+      shares  = result["shares"] || []
+
+      if shares.empty?
+        $stdout.puts "No pending shares."
+        return
+      end
+
+      $stdout.puts "Found #{shares.size} pending share(s):"
+      $stdout.puts
+
+      imported = 0
+      shares.each do |share|
+        vault_name = "#{share["vault_name"]}-from-#{share["sender_handle"]}"
+        $stdout.puts "  [#{share["id"]}] vault '#{share["vault_name"]}' from @#{share["sender_handle"]}"
+
+        begin
+          secrets = ShareCrypto.decrypt_from(share["encrypted_payload"], Identity.private_key_bytes)
+        rescue ShareCrypto::DecryptionError => e
+          $stderr.puts "    Failed to decrypt: #{e.message}"
+          next
+        end
+
+        if Store.new(vault_name).exists?
+          $stdout.puts "    Vault '#{vault_name}' already exists, skipping."
+          next
+        end
+
+        passphrase = prompt_passphrase("    Passphrase for new vault '#{vault_name}': ")
+        if passphrase.empty?
+          $stderr.puts "    Skipped (empty passphrase)."
+          next
+        end
+
+        salt       = Crypto.generate_salt
+        master_key = Crypto.derive_master_key(passphrase, salt)
+        vault      = Vault.create!(name: vault_name, master_key: master_key, salt: salt)
+        secrets.each { |k, v| vault.set(k, v.to_s) }
+
+        $stdout.puts "    Imported #{secrets.size} secret(s) → vault '#{vault_name}'"
+        client.accept_share(share["id"]) rescue nil
+        imported += 1
+      end
+
+      $stdout.puts
+      $stdout.puts "Done. #{imported} vault(s) imported."
+    rescue ApiClient::ApiError => e
+      abort_with e.message
+    end
+
+    desc "revoke SHARE_ID", "Revoke a vault share (stops future access)"
+    def revoke(share_id)
+      unless Config.token
+        abort_with "Not connected. Run: localvault connect --token TOKEN --handle HANDLE"
+        return
+      end
+
+      client = ApiClient.new(token: Config.token)
+      client.revoke_share(share_id)
+      $stdout.puts "Share #{share_id} revoked."
+      $stdout.puts "Note: @recipient retains any secrets already received."
+    rescue ApiClient::ApiError => e
+      abort_with e.message
+    end
+
     desc "version", "Print version"
     def version
       $stdout.puts "localvault #{VERSION}"
@@ -429,6 +573,56 @@ module LocalVault
 
     def resolve_vault_name
       options[:vault] || Config.default_vault
+    end
+
+    def open_vault_by_name!(vault_name)
+      if (vault = vault_from_session(vault_name))
+        return vault
+      end
+
+      store = Store.new(vault_name)
+      unless store.exists?
+        abort_with "Vault '#{vault_name}' does not exist. Run: localvault init #{vault_name}"
+        raise SystemExit.new(1)
+      end
+
+      if (master_key = SessionCache.get(vault_name))
+        begin
+          vault = Vault.new(name: vault_name, master_key: master_key)
+          vault.all
+          return vault
+        rescue Crypto::DecryptionError
+          SessionCache.clear(vault_name)
+        end
+      end
+
+      passphrase = prompt_passphrase("Passphrase for '#{vault_name}': ")
+      vault = Vault.open(name: vault_name, passphrase: passphrase)
+      vault.all
+      SessionCache.set(vault_name, vault.master_key)
+      vault
+    rescue Crypto::DecryptionError
+      abort_with "Wrong passphrase for vault '#{vault_name}'"
+      raise SystemExit.new(1)
+    end
+
+    def resolve_recipients(client, target)
+      if target.start_with?("team:")
+        handle = target.delete_prefix("team:")
+        result = client.team_public_keys(handle)
+        (result["members"] || []).map { |m| [m["handle"], m["public_key"]] }
+      elsif target.start_with?("crew:")
+        slug   = target.delete_prefix("crew:")
+        result = client.crew_public_keys(slug)
+        (result["members"] || []).map { |m| [m["handle"], m["public_key"]] }
+      else
+        handle = target.delete_prefix("@")
+        result = client.get_public_key(handle)
+        [[result["handle"], result["public_key"]]]
+      end
+    rescue ApiClient::ApiError => e
+      $stderr.puts "Warning: #{e.message}"
+      []
     end
 
     def open_vault!
