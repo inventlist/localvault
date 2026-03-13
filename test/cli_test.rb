@@ -684,59 +684,60 @@ class CLITest < Minitest::Test
 
   # --- install-mcp ---
 
-  def test_install_mcp_creates_claude_code_settings
-    target = File.join(@test_home, ".claude", "settings.json")
-    with_home_override(@test_home) do
+  # Claude Code delegates to `claude mcp add --scope user` — test via stub
+  def test_install_mcp_claude_code_calls_cli
+    commands_run = []
+    stub_system_calls(commands_run) do
       out, = capture_io { LocalVault::CLI.start(%w[install-mcp claude-code]) }
-      assert_match(/Added localvault MCP server/, out)
-      assert File.exist?(target)
-      settings = JSON.parse(File.read(target))
-      assert_equal "localvault", settings.dig("mcpServers", "localvault", "command")
-      assert_equal ["mcp"],      settings.dig("mcpServers", "localvault", "args")
+      assert_match(/Added localvault MCP server.*user scope/, out)
+      assert commands_run.any? { |cmd| cmd.include?("mcp") && cmd.include?("add") && cmd.include?("user") }
     end
   end
 
-  def test_install_mcp_merges_with_existing_settings
-    target = File.join(@test_home, ".claude", "settings.json")
-    FileUtils.mkdir_p(File.dirname(target))
-    File.write(target, JSON.generate({ "alwaysThinkingEnabled" => true, "mcpServers" => { "other" => { "command" => "other" } } }))
-
-    with_home_override(@test_home) do
-      capture_io { LocalVault::CLI.start(%w[install-mcp claude-code]) }
-      settings = JSON.parse(File.read(target))
-      assert settings["alwaysThinkingEnabled"], "existing settings preserved"
-      assert settings.dig("mcpServers", "other"), "existing MCP servers preserved"
-      assert_equal "localvault", settings.dig("mcpServers", "localvault", "command")
+  def test_install_mcp_cursor_writes_json
+    config_path = File.join(@test_home, ".cursor", "mcp.json")
+    stub_cursor_path(config_path) do
+      capture_io { LocalVault::CLI.start(%w[install-mcp cursor]) }
+      assert File.exist?(config_path)
+      settings = JSON.parse(File.read(config_path))
+      assert_equal ["mcp"], settings.dig("mcpServers", "localvault", "args")
     end
   end
 
-  def test_install_mcp_updates_existing_localvault_entry
-    target = File.join(@test_home, ".claude", "settings.json")
-    FileUtils.mkdir_p(File.dirname(target))
-    File.write(target, JSON.generate({ "mcpServers" => { "localvault" => { "command" => "localvault", "args" => ["mcp"], "env" => { "LOCALVAULT_VAULT" => "old_team" } } } }))
+  def test_install_mcp_cursor_merges_existing_settings
+    config_path = File.join(@test_home, ".cursor", "mcp.json")
+    FileUtils.mkdir_p(File.dirname(config_path))
+    File.write(config_path, JSON.generate({ "mcpServers" => { "other" => { "command" => "other" } } }))
 
-    with_home_override(@test_home) do
-      out, = capture_io { LocalVault::CLI.start(%w[install-mcp claude-code]) }
-      assert_match(/Updated localvault MCP server/, out)
-      settings = JSON.parse(File.read(target))
-      refute settings.dig("mcpServers", "localvault", "env"), "no hardcoded env vars"
+    stub_cursor_path(config_path) do
+      capture_io { LocalVault::CLI.start(%w[install-mcp cursor]) }
+      settings = JSON.parse(File.read(config_path))
+      assert settings.dig("mcpServers", "other"), "existing servers preserved"
+      assert settings.dig("mcpServers", "localvault"), "localvault added"
+    end
+  end
+
+  def test_install_mcp_windsurf_writes_json
+    config_path = File.join(@test_home, ".codeium", "windsurf", "mcp_config.json")
+    stub_windsurf_path(config_path) do
+      capture_io { LocalVault::CLI.start(%w[install-mcp windsurf]) }
+      assert File.exist?(config_path)
+      settings = JSON.parse(File.read(config_path))
+      assert settings.dig("mcpServers", "localvault")
     end
   end
 
   def test_install_mcp_default_is_claude_code
-    target = File.join(@test_home, ".claude", "settings.json")
-    with_home_override(@test_home) do
+    commands_run = []
+    stub_system_calls(commands_run) do
       out, = capture_io { LocalVault::CLI.start(%w[install-mcp]) }
       assert_match(/Claude Code/, out)
-      assert File.exist?(target)
     end
   end
 
   def test_install_mcp_unknown_client_errors
-    with_home_override(@test_home) do
-      _, err = capture_io { LocalVault::CLI.start(%w[install-mcp unknown-client]) }
-      assert_match(/Unknown client/, err)
-    end
+    _, err = capture_io { LocalVault::CLI.start(%w[install-mcp unknown-client]) }
+    assert_match(/Unknown client/, err)
   end
 
   private
@@ -814,12 +815,50 @@ class CLITest < Minitest::Test
     LocalVault::CLI.send(:define_method, :prompt_confirmation, original)
   end
 
-  def with_home_override(path)
-    cli_class = LocalVault::CLI
-    orig_claude = cli_class.instance_method(:claude_code_settings_path)
-    cli_class.send(:define_method, :claude_code_settings_path) { File.join(path, ".claude", "settings.json") }
+  # Stub find_binary + system for claude-code tests.
+  # commands_run is populated with each array passed to system().
+  def stub_system_calls(commands_run)
+    cli = LocalVault::CLI
+    orig_find  = cli.instance_method(:find_binary)
+    orig_sys   = cli.instance_method(:system_command_exists?)
+    orig_sys2  = cli.instance_method(:system)
+
+    cli.send(:define_method, :find_binary) { |_name| "/usr/local/bin/localvault" }
+    cli.send(:define_method, :system_command_exists?) { |_cmd| true }
+    cli.send(:define_method, :system) { |*args, **_kw| commands_run << args; true }
+
     yield
   ensure
-    cli_class.send(:define_method, :claude_code_settings_path, orig_claude)
+    cli.send(:define_method, :find_binary, orig_find)
+    cli.send(:define_method, :system_command_exists?, orig_sys)
+    cli.send(:define_method, :system, orig_sys2)
+  end
+
+  def stub_cursor_path(path)
+    cli = LocalVault::CLI
+    orig_find = cli.instance_method(:find_binary)
+    orig_path = cli.instance_method(:cursor_settings_path)
+
+    cli.send(:define_method, :find_binary) { |_| "/usr/local/bin/localvault" }
+    cli.send(:define_method, :cursor_settings_path) { path }
+
+    yield
+  ensure
+    cli.send(:define_method, :find_binary, orig_find)
+    cli.send(:define_method, :cursor_settings_path, orig_path)
+  end
+
+  def stub_windsurf_path(path)
+    cli = LocalVault::CLI
+    orig_find = cli.instance_method(:find_binary)
+    orig_path = cli.instance_method(:windsurf_settings_path)
+
+    cli.send(:define_method, :find_binary) { |_| "/usr/local/bin/localvault" }
+    cli.send(:define_method, :windsurf_settings_path) { path }
+
+    yield
+  ensure
+    cli.send(:define_method, :find_binary, orig_find)
+    cli.send(:define_method, :windsurf_settings_path, orig_path)
   end
 end

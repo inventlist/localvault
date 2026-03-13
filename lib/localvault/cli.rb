@@ -271,9 +271,9 @@ module LocalVault
     DESC
     def install_mcp(client = "claude-code")
       case client.downcase
-      when "claude-code"  then install_mcp_for("Claude Code",  claude_code_settings_path)
-      when "cursor"       then install_mcp_for("Cursor",        cursor_settings_path)
-      when "windsurf"     then install_mcp_for("Windsurf",      windsurf_settings_path)
+      when "claude-code"  then install_for_claude_code
+      when "cursor"       then install_mcp_via_json("Cursor",   cursor_settings_path)
+      when "windsurf"     then install_mcp_via_json("Windsurf", windsurf_settings_path)
       else
         abort_with "Unknown client '#{client}'. Supported: claude-code, cursor, windsurf"
       end
@@ -835,45 +835,81 @@ module LocalVault
 
     # --- install-mcp helpers ---
 
-    def install_mcp_for(client_name, settings_path)
+    # Claude Code: use `claude mcp add --scope user` so the server is
+    # registered globally (user scope) — not tied to a single project.
+    def install_for_claude_code
+      unless system_command_exists?("claude")
+        abort_with "Claude Code CLI not found. Install it from https://claude.ai/code"
+        return
+      end
+
+      localvault_bin = find_binary("localvault")
+      if localvault_bin.nil?
+        abort_with "localvault not found in PATH"
+        return
+      end
+
+      # Remove existing entry first (idempotent)
+      system("claude", "mcp", "remove", "localvault", "--scope", "user",
+             out: File::NULL, err: File::NULL)
+
+      success = system("claude", "mcp", "add", "--scope", "user",
+                       "localvault", localvault_bin, "mcp")
+
+      if success
+        $stdout.puts "Added localvault MCP server to Claude Code (user scope — global)"
+        print_next_steps("Claude Code")
+      else
+        abort_with "Failed to add MCP server. Try: claude mcp add --scope user localvault #{localvault_bin} mcp"
+      end
+    end
+
+    # Cursor / Windsurf / others: write to their JSON config file directly.
+    def install_mcp_via_json(client_name, config_path)
       require "json"
       require "fileutils"
 
-      FileUtils.mkdir_p(File.dirname(settings_path))
-
-      settings = if File.exist?(settings_path)
-        JSON.parse(File.read(settings_path))
-      else
-        {}
+      localvault_bin = find_binary("localvault")
+      if localvault_bin.nil?
+        abort_with "localvault not found in PATH"
+        return
       end
 
-      # Merge MCP server entry — don't clobber other settings
-      settings["mcpServers"] ||= {}
-      existing = settings["mcpServers"]["localvault"]
+      FileUtils.mkdir_p(File.dirname(config_path))
 
+      settings = File.exist?(config_path) ? JSON.parse(File.read(config_path)) : {}
+      existing = settings.dig("mcpServers", "localvault")
+
+      settings["mcpServers"] ||= {}
       settings["mcpServers"]["localvault"] = {
-        "command" => "localvault",
+        "command" => localvault_bin,
         "args"    => ["mcp"]
       }
 
-      File.write(settings_path, JSON.pretty_generate(settings) + "\n")
+      File.write(config_path, JSON.pretty_generate(settings) + "\n")
 
-      if existing
-        $stdout.puts "Updated localvault MCP server in #{client_name} (#{settings_path})"
-      else
-        $stdout.puts "Added localvault MCP server to #{client_name} (#{settings_path})"
-      end
+      verb = existing ? "Updated" : "Added"
+      $stdout.puts "#{verb} localvault MCP server in #{client_name} (#{config_path})"
+      print_next_steps(client_name)
+    end
+
+    def print_next_steps(client_name)
       $stdout.puts ""
       $stdout.puts "Next steps:"
       $stdout.puts "  1. Restart #{client_name}"
       $stdout.puts "  2. Unlock your vault once:  localvault show"
-      $stdout.puts "  3. The AI can now read/write secrets from your default vault"
-      $stdout.puts "     To switch vaults: localvault switch <vault>"
+      $stdout.puts "  3. The AI can now access secrets from your default vault"
+      $stdout.puts "     Switch vaults: localvault switch <vault>"
     end
 
     no_commands do
-      def claude_code_settings_path
-        File.expand_path("~/.claude/settings.json")
+      def find_binary(name)
+        path = `which #{name} 2>/dev/null`.strip
+        path.empty? ? nil : path
+      end
+
+      def system_command_exists?(cmd)
+        !find_binary(cmd).nil?
       end
 
       def cursor_settings_path
