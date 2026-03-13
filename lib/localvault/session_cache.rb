@@ -1,4 +1,5 @@
 require "base64"
+require "fileutils"
 require "shellwords"
 
 module LocalVault
@@ -6,7 +7,8 @@ module LocalVault
   # Avoids re-prompting passphrase on every command.
   #
   # Stored payload: "<base64_key>|<expiry_unix_ts>"
-  # Keychain service: "localvault", account: vault name
+  # macOS: Keychain service "localvault", account: vault name
+  # Linux/other: ~/.localvault/.sessions/<vault_name> (mode 0600)
   module SessionCache
     DEFAULT_TTL_HOURS = 8
     KEYCHAIN_SERVICE  = "localvault"
@@ -42,31 +44,63 @@ module LocalVault
 
     private
 
+    def self.macos?
+      RUBY_PLATFORM.include?("darwin")
+    end
+
+    def self.sessions_dir
+      dir = File.join(
+        ENV.fetch("LOCALVAULT_HOME", File.expand_path("~/.localvault")),
+        ".sessions"
+      )
+      FileUtils.mkdir_p(dir, mode: 0o700)
+      dir
+    end
+
+    def self.session_file(vault_name)
+      File.join(sessions_dir, vault_name.gsub(/[^a-zA-Z0-9_\-]/, "_"))
+    end
+
     def self.keychain_get(vault_name)
-      out = `security find-generic-password -a #{Shellwords.escape(vault_name)} -s #{Shellwords.escape(KEYCHAIN_SERVICE)} -w 2>/dev/null`.chomp
-      $?.success? && !out.empty? ? out : nil
+      if macos?
+        out = `security find-generic-password -a #{Shellwords.escape(vault_name)} -s #{Shellwords.escape(KEYCHAIN_SERVICE)} -w 2>/dev/null`.chomp
+        $?.success? && !out.empty? ? out : nil
+      else
+        file = session_file(vault_name)
+        File.exist?(file) ? File.read(file).strip : nil
+      end
     end
 
     def self.keychain_set(vault_name, payload)
-      # Delete existing entry first (update = delete + add)
-      keychain_delete(vault_name)
-      system(
-        "security", "add-generic-password",
-        "-a", vault_name,
-        "-s", KEYCHAIN_SERVICE,
-        "-w", payload,
-        "-A",              # allow any app — no OS dialog on read (vault passphrase is the real security)
-        out: File::NULL, err: File::NULL
-      )
+      if macos?
+        keychain_delete(vault_name)
+        system(
+          "security", "add-generic-password",
+          "-a", vault_name,
+          "-s", KEYCHAIN_SERVICE,
+          "-w", payload,
+          "-A",
+          out: File::NULL, err: File::NULL
+        )
+      else
+        keychain_delete(vault_name)
+        file = session_file(vault_name)
+        File.write(file, payload)
+        File.chmod(0o600, file)
+      end
     end
 
     def self.keychain_delete(vault_name)
-      system(
-        "security", "delete-generic-password",
-        "-a", vault_name,
-        "-s", KEYCHAIN_SERVICE,
-        out: File::NULL, err: File::NULL
-      )
+      if macos?
+        system(
+          "security", "delete-generic-password",
+          "-a", vault_name,
+          "-s", KEYCHAIN_SERVICE,
+          out: File::NULL, err: File::NULL
+        )
+      else
+        FileUtils.rm_f(session_file(vault_name))
+      end
     end
 
   end
