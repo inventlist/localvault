@@ -8,7 +8,9 @@ class MCPServerTest < Minitest::Test
     setup_test_home
     LocalVault::Config.ensure_directories!
     @original_session = ENV["LOCALVAULT_SESSION"]
+    @original_vault   = ENV["LOCALVAULT_VAULT"]
     ENV.delete("LOCALVAULT_SESSION")
+    ENV.delete("LOCALVAULT_VAULT")
   end
 
   def teardown
@@ -16,6 +18,11 @@ class MCPServerTest < Minitest::Test
       ENV["LOCALVAULT_SESSION"] = @original_session
     else
       ENV.delete("LOCALVAULT_SESSION")
+    end
+    if @original_vault
+      ENV["LOCALVAULT_VAULT"] = @original_vault
+    else
+      ENV.delete("LOCALVAULT_VAULT")
     end
     teardown_test_home
   end
@@ -61,6 +68,16 @@ class MCPServerTest < Minitest::Test
     end
   end
 
+  def test_tools_list_includes_vault_parameter
+    with_vault_session do
+      response = send_request("tools/list", {})
+      get_tool = response.dig("result", "tools").find { |t| t["name"] == "get_secret" }
+      assert get_tool.dig("inputSchema", "properties", "vault"), "get_secret should have vault param"
+      # vault is optional
+      refute_includes get_tool.dig("inputSchema", "required"), "vault"
+    end
+  end
+
   def test_tools_list_includes_input_schemas
     with_vault_session do
       response = send_request("tools/list", {})
@@ -82,6 +99,15 @@ class MCPServerTest < Minitest::Test
       assert_equal "sk-12345", content[0]["text"]
       refute response.dig("result", "isError")
     end
+  end
+
+  def test_get_secret_uses_session_vault_by_default
+    vault_a = create_test_vault("vaultA")
+    vault_a.set("KEY", "from_a")
+    ENV["LOCALVAULT_SESSION"] = session_token_for("vaultA")
+
+    response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY" } })
+    assert_equal "from_a", response.dig("result", "content", 0, "text")
   end
 
   def test_get_secret_missing_key_returns_error
@@ -124,6 +150,17 @@ class MCPServerTest < Minitest::Test
     end
   end
 
+  def test_set_secret_supports_dot_notation
+    with_vault_session do |vault|
+      response = send_request("tools/call", {
+        "name" => "set_secret",
+        "arguments" => { "key" => "platepose.DATABASE_URL", "value" => "postgres://localhost/test" }
+      })
+      refute response.dig("result", "isError")
+      assert_equal "postgres://localhost/test", vault.get("platepose.DATABASE_URL")
+    end
+  end
+
   # --- tools/call delete_secret ---
 
   def test_delete_secret_removes_key
@@ -141,6 +178,45 @@ class MCPServerTest < Minitest::Test
       response = send_request("tools/call", { "name" => "delete_secret", "arguments" => { "key" => "NOPE" } })
       assert response.dig("result", "isError")
       assert_match(/not found/, response.dig("result", "content", 0, "text"))
+    end
+  end
+
+  # --- multi-vault: named vault via argument ---
+
+  def test_get_secret_from_explicit_vault_via_keychain
+    vault_a = create_test_vault("teamA")
+    vault_b = create_test_vault("teamB")
+    vault_a.set("SECRET", "a_value")
+    vault_b.set("SECRET", "b_value")
+
+    master_b = LocalVault::Crypto.derive_master_key(test_passphrase, LocalVault::Store.new("teamB").salt)
+
+    # Default session = teamA
+    ENV["LOCALVAULT_SESSION"] = session_token_for("teamA")
+
+    # Stub Keychain: only return master_b for "teamB"
+    stub_keychain(->(name) { name == "teamB" ? master_b : nil }) do
+      require "localvault/mcp/server"
+      server = LocalVault::MCP::Server.new(input: StringIO.new, output: StringIO.new)
+
+      response_a = server_call(server, "tools/call", { "name" => "get_secret", "arguments" => { "key" => "SECRET" } })
+      assert_equal "a_value", response_a.dig("result", "content", 0, "text")
+
+      response_b = server_call(server, "tools/call", { "name" => "get_secret", "arguments" => { "key" => "SECRET", "vault" => "teamB" } })
+      assert_equal "b_value", response_b.dig("result", "content", 0, "text")
+    end
+  end
+
+  def test_named_vault_not_unlocked_returns_helpful_error
+    with_vault_session do
+      stub_keychain(->(_) { nil }) do
+        response = send_request("tools/call", {
+          "name" => "get_secret",
+          "arguments" => { "key" => "X", "vault" => "other_team" }
+        })
+        assert response.dig("result", "isError")
+        assert_match(/other_team/, response.dig("result", "content", 0, "text"))
+      end
     end
   end
 
@@ -176,10 +252,11 @@ class MCPServerTest < Minitest::Test
   # --- missing session ---
 
   def test_missing_session_returns_helpful_error
-    # No session set
-    response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "X" } })
-    assert response.dig("result", "isError")
-    assert_match(/localvault unlock/, response.dig("result", "content", 0, "text"))
+    stub_keychain(->(_) { nil }) do
+      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "X" } })
+      assert response.dig("result", "isError")
+      assert_match(/localvault show/, response.dig("result", "content", 0, "text"))
+    end
   end
 
   private
@@ -210,6 +287,20 @@ class MCPServerTest < Minitest::Test
     input = StringIO.new(input_string)
     output = StringIO.new
     LocalVault::MCP::Server.new(input: input, output: output)
+  end
+
+  def server_call(server, method, params, id: 1)
+    message = JSON.generate({ "jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params })
+    server.handle_message(message)
+  end
+
+  # Temporarily replaces SessionCache.get with a callable for the duration of the block.
+  def stub_keychain(callable)
+    original = LocalVault::SessionCache.method(:get)
+    LocalVault::SessionCache.define_singleton_method(:get) { |name| callable.call(name) }
+    yield
+  ensure
+    LocalVault::SessionCache.define_singleton_method(:get, original)
   end
 
   def send_request(method, params, id: 1)

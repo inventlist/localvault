@@ -3,85 +3,92 @@ require "json"
 module LocalVault
   module MCP
     module Tools
+      VAULT_PARAM = {
+        "vault" => {
+          "type" => "string",
+          "description" => "Vault name to use (uses default vault if omitted)"
+        }
+      }.freeze
+
       DEFINITIONS = [
         {
           "name" => "get_secret",
-          "description" => "Retrieve a secret value by key",
+          "description" => "Retrieve a secret value by key from a localvault vault",
           "inputSchema" => {
             "type" => "object",
             "properties" => {
-              "key" => { "type" => "string", "description" => "The secret key to retrieve" }
+              "key"   => { "type" => "string", "description" => "The secret key to retrieve" },
+              **VAULT_PARAM
             },
             "required" => ["key"]
           }
         },
         {
           "name" => "list_secrets",
-          "description" => "List all secret keys in the vault",
+          "description" => "List all secret keys in a localvault vault",
           "inputSchema" => {
             "type" => "object",
-            "properties" => {},
+            "properties" => { **VAULT_PARAM },
             "required" => []
           }
         },
         {
           "name" => "set_secret",
-          "description" => "Store a secret key-value pair",
+          "description" => "Store a secret key-value pair in a localvault vault. Use dot-notation (project.KEY) for namespaced secrets.",
           "inputSchema" => {
             "type" => "object",
             "properties" => {
-              "key" => { "type" => "string", "description" => "The secret key" },
-              "value" => { "type" => "string", "description" => "The secret value" }
+              "key"   => { "type" => "string", "description" => "The secret key (supports dot-notation: project.KEY)" },
+              "value" => { "type" => "string", "description" => "The secret value" },
+              **VAULT_PARAM
             },
             "required" => ["key", "value"]
           }
         },
         {
           "name" => "delete_secret",
-          "description" => "Delete a secret by key",
+          "description" => "Delete a secret by key from a localvault vault",
           "inputSchema" => {
             "type" => "object",
             "properties" => {
-              "key" => { "type" => "string", "description" => "The secret key to delete" }
+              "key"   => { "type" => "string", "description" => "The secret key to delete" },
+              **VAULT_PARAM
             },
             "required" => ["key"]
           }
         }
       ].freeze
 
-      def self.call(name, arguments, vault)
+      # vault_resolver: callable that takes a vault name (String or nil) and returns a Vault or nil
+      def self.call(name, arguments, vault_resolver)
+        unless DEFINITIONS.any? { |t| t["name"] == name }
+          raise ArgumentError, "Unknown tool: #{name}"
+        end
+
+        vault_name = arguments["vault"]
+        vault = vault_resolver.call(vault_name)
+
         unless vault
-          return error_result("No vault session. Run: eval $(localvault unlock)")
+          hint = vault_name ? "localvault show -v #{vault_name}" : "localvault show"
+          return error_result("No unlocked vault session. Run: #{hint}")
         end
 
         case name
-        when "get_secret"
-          get_secret(arguments["key"], vault)
-        when "list_secrets"
-          list_secrets(vault)
-        when "set_secret"
-          set_secret(arguments["key"], arguments["value"], vault)
-        when "delete_secret"
-          delete_secret(arguments["key"], vault)
+        when "get_secret"    then get_secret(arguments["key"], vault)
+        when "list_secrets"  then list_secrets(vault)
+        when "set_secret"    then set_secret(arguments["key"], arguments["value"], vault)
+        when "delete_secret" then delete_secret(arguments["key"], vault)
         end
       end
 
       def self.get_secret(key, vault)
         value = vault.get(key)
-        if value.nil?
-          error_result("Key '#{key}' not found")
-        else
-          text_result(value)
-        end
+        value.nil? ? error_result("Key '#{key}' not found") : text_result(value)
       end
 
       def self.list_secrets(vault)
         keys = vault.list
-        if keys.empty?
-          text_result("No secrets stored")
-        else
-          text_result(keys.join("\n"))
-        end
+        keys.empty? ? text_result("No secrets stored") : text_result(keys.join("\n"))
       end
 
       def self.set_secret(key, value, vault)
@@ -91,11 +98,7 @@ module LocalVault
 
       def self.delete_secret(key, vault)
         deleted = vault.delete(key)
-        if deleted.nil?
-          error_result("Key '#{key}' not found")
-        else
-          text_result("Deleted #{key}")
-        end
+        deleted.nil? ? error_result("Key '#{key}' not found") : text_result("Deleted #{key}")
       end
 
       def self.text_result(text)

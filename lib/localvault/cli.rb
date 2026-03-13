@@ -257,6 +257,28 @@ module LocalVault
       MCP::Server.new.start
     end
 
+    desc "install-mcp [CLIENT]", "Configure localvault MCP server in your AI tool (default: claude-code)"
+    long_desc <<~DESC
+      Adds localvault as an MCP server so AI assistants can read and write your secrets.
+
+      Supported clients:
+        claude-code   Adds to ~/.claude/settings.json  (default)
+        cursor        Adds to ~/.cursor/mcp.json
+        windsurf      Adds to ~/.codeium/windsurf/mcp_config.json
+
+      The MCP server uses whichever vault is your current default (localvault switch).
+      Unlock the vault once with `localvault show`, then the AI tool picks it up via Keychain.
+    DESC
+    def install_mcp(client = "claude-code")
+      case client.downcase
+      when "claude-code"  then install_mcp_for("Claude Code",  claude_code_settings_path)
+      when "cursor"       then install_mcp_for("Cursor",        cursor_settings_path)
+      when "windsurf"     then install_mcp_for("Windsurf",      windsurf_settings_path)
+      else
+        abort_with "Unknown client '#{client}'. Supported: claude-code, cursor, windsurf"
+      end
+    end
+
     desc "demo", "Create demo vaults with fake data for learning (passphrase: demo)"
     def demo
       names = Store.list_vaults
@@ -809,6 +831,58 @@ module LocalVault
 
     def abort_with(message)
       $stderr.puts "Error: #{message}"
+    end
+
+    # --- install-mcp helpers ---
+
+    def install_mcp_for(client_name, settings_path)
+      require "json"
+      require "fileutils"
+
+      FileUtils.mkdir_p(File.dirname(settings_path))
+
+      settings = if File.exist?(settings_path)
+        JSON.parse(File.read(settings_path))
+      else
+        {}
+      end
+
+      # Merge MCP server entry — don't clobber other settings
+      settings["mcpServers"] ||= {}
+      existing = settings["mcpServers"]["localvault"]
+
+      settings["mcpServers"]["localvault"] = {
+        "command" => "localvault",
+        "args"    => ["mcp"]
+      }
+
+      File.write(settings_path, JSON.pretty_generate(settings) + "\n")
+
+      if existing
+        $stdout.puts "Updated localvault MCP server in #{client_name} (#{settings_path})"
+      else
+        $stdout.puts "Added localvault MCP server to #{client_name} (#{settings_path})"
+      end
+      $stdout.puts ""
+      $stdout.puts "Next steps:"
+      $stdout.puts "  1. Restart #{client_name}"
+      $stdout.puts "  2. Unlock your vault once:  localvault show"
+      $stdout.puts "  3. The AI can now read/write secrets from your default vault"
+      $stdout.puts "     To switch vaults: localvault switch <vault>"
+    end
+
+    no_commands do
+      def claude_code_settings_path
+        File.expand_path("~/.claude/settings.json")
+      end
+
+      def cursor_settings_path
+        File.expand_path("~/.cursor/mcp.json")
+      end
+
+      def windsurf_settings_path
+        File.expand_path("~/.codeium/windsurf/mcp_config.json")
+      end
     end
   end
 end

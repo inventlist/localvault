@@ -3,10 +3,10 @@
 # Support both development (require_relative) and installed (load path) usage
 begin
   require_relative "../lib/localvault"
+  require_relative "../lib/localvault/cli"
 rescue LoadError
   require "localvault"
+  require "localvault/cli"
 end
-
-require "localvault/cli"
 
 LocalVault::CLI.start(ARGV)

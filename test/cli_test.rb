@@ -682,6 +682,63 @@ class CLITest < Minitest::Test
     end
   end
 
+  # --- install-mcp ---
+
+  def test_install_mcp_creates_claude_code_settings
+    target = File.join(@test_home, ".claude", "settings.json")
+    with_home_override(@test_home) do
+      out, = capture_io { LocalVault::CLI.start(%w[install-mcp claude-code]) }
+      assert_match(/Added localvault MCP server/, out)
+      assert File.exist?(target)
+      settings = JSON.parse(File.read(target))
+      assert_equal "localvault", settings.dig("mcpServers", "localvault", "command")
+      assert_equal ["mcp"],      settings.dig("mcpServers", "localvault", "args")
+    end
+  end
+
+  def test_install_mcp_merges_with_existing_settings
+    target = File.join(@test_home, ".claude", "settings.json")
+    FileUtils.mkdir_p(File.dirname(target))
+    File.write(target, JSON.generate({ "alwaysThinkingEnabled" => true, "mcpServers" => { "other" => { "command" => "other" } } }))
+
+    with_home_override(@test_home) do
+      capture_io { LocalVault::CLI.start(%w[install-mcp claude-code]) }
+      settings = JSON.parse(File.read(target))
+      assert settings["alwaysThinkingEnabled"], "existing settings preserved"
+      assert settings.dig("mcpServers", "other"), "existing MCP servers preserved"
+      assert_equal "localvault", settings.dig("mcpServers", "localvault", "command")
+    end
+  end
+
+  def test_install_mcp_updates_existing_localvault_entry
+    target = File.join(@test_home, ".claude", "settings.json")
+    FileUtils.mkdir_p(File.dirname(target))
+    File.write(target, JSON.generate({ "mcpServers" => { "localvault" => { "command" => "localvault", "args" => ["mcp"], "env" => { "LOCALVAULT_VAULT" => "old_team" } } } }))
+
+    with_home_override(@test_home) do
+      out, = capture_io { LocalVault::CLI.start(%w[install-mcp claude-code]) }
+      assert_match(/Updated localvault MCP server/, out)
+      settings = JSON.parse(File.read(target))
+      refute settings.dig("mcpServers", "localvault", "env"), "no hardcoded env vars"
+    end
+  end
+
+  def test_install_mcp_default_is_claude_code
+    target = File.join(@test_home, ".claude", "settings.json")
+    with_home_override(@test_home) do
+      out, = capture_io { LocalVault::CLI.start(%w[install-mcp]) }
+      assert_match(/Claude Code/, out)
+      assert File.exist?(target)
+    end
+  end
+
+  def test_install_mcp_unknown_client_errors
+    with_home_override(@test_home) do
+      _, err = capture_io { LocalVault::CLI.start(%w[install-mcp unknown-client]) }
+      assert_match(/Unknown client/, err)
+    end
+  end
+
   private
 
   def create_test_vault(name, passphrase = test_passphrase)
@@ -755,5 +812,14 @@ class CLITest < Minitest::Test
     yield
   ensure
     LocalVault::CLI.send(:define_method, :prompt_confirmation, original)
+  end
+
+  def with_home_override(path)
+    cli_class = LocalVault::CLI
+    orig_claude = cli_class.instance_method(:claude_code_settings_path)
+    cli_class.send(:define_method, :claude_code_settings_path) { File.join(path, ".claude", "settings.json") }
+    yield
+  ensure
+    cli_class.send(:define_method, :claude_code_settings_path, orig_claude)
   end
 end
