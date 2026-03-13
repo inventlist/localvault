@@ -110,14 +110,90 @@ all project groups.
 
 ---
 
+## Bulk import
+
+Instead of setting keys one by one, import from an existing file:
+
+```bash
+# From a .env file
+localvault import .env -v intellectaco --project platepose
+
+# From JSON
+localvault import secrets.json -v intellectaco --project platepose
+
+# From YAML
+localvault import secrets.yml -v intellectaco --project platepose
+
+# Nested JSON imports structure directly
+localvault import all-secrets.json -v intellectaco
+```
+
+Supported formats:
+
+**.env** — `KEY=value` lines, comments and blanks ignored:
+```
+SECRET_KEY_BASE=abc123
+DATABASE_URL=postgres://...
+# this is ignored
+```
+
+**.json** — flat or nested:
+```json
+{ "SECRET_KEY_BASE": "abc", "DATABASE_URL": "postgres://..." }
+```
+```json
+{ "platepose": { "SECRET_KEY_BASE": "abc" }, "inventlist": { "API_KEY": "xyz" } }
+```
+
+**.yml / .yaml**:
+```yaml
+SECRET_KEY_BASE: abc123
+DATABASE_URL: postgres://...
+```
+
+---
+
+## Moving secrets around
+
+```bash
+# Rename a key
+localvault rename OLD_KEY NEW_KEY -v intellectaco
+
+# Copy a key to another vault (great for promoting staging → production)
+localvault copy platepose.DATABASE_URL --to production -v intellectaco
+
+# Delete one key
+localvault delete platepose.SECRET_KEY_BASE -v intellectaco
+
+# Delete an entire project group
+localvault delete platepose -v intellectaco
+```
+
+---
+
+## Switching vaults
+
+```bash
+localvault switch              # show current vault + all available
+localvault switch intellectaco # make intellectaco the default
+localvault switch default      # switch back
+```
+
+---
+
 ## Quick reference
 
 | Goal | Command |
 |------|---------|
 | Simple key | `localvault set KEY value` |
 | Nested key | `localvault set project.KEY value -v vault` |
+| Import from file | `localvault import file.env -v vault --project app` |
+| Rename key | `localvault rename OLD NEW` |
+| Copy to vault | `localvault copy KEY --to other-vault` |
+| Delete group | `localvault delete project -v vault` |
 | View all grouped | `localvault show --group` |
 | View one project | `localvault show -p platepose -v vault` |
 | Inject all (flat) | `localvault exec -- cmd` |
 | Inject one project | `localvault exec -p platepose -v vault -- cmd` |
 | Export one project | `eval $(localvault env -p platepose -v vault)` |
+| Switch vault | `localvault switch intellectaco` |

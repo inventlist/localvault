@@ -439,6 +439,71 @@ module LocalVault
       abort_with e.message
     end
 
+    desc "import FILE", "Import secrets from a .env, .json, or .yml file"
+    method_option :project, aliases: "-p", type: :string, desc: "Import keys under this project group"
+    def import(file)
+      unless File.exist?(file)
+        abort_with "File not found: #{file}"
+        return
+      end
+
+      data = parse_import_file(file)
+      if data.nil? || data.empty?
+        abort_with "No secrets found in #{file}"
+        return
+      end
+
+      vault   = open_vault!
+      project = options[:project]
+      count   = 0
+
+      data.each do |key, value|
+        if value.is_a?(Hash)
+          value.each do |subkey, subval|
+            vault.set("#{key}.#{subkey}", subval.to_s)
+            count += 1
+          end
+        else
+          dest_key = project ? "#{project}.#{key}" : key
+          vault.set(dest_key, value.to_s)
+          count += 1
+        end
+      end
+
+      $stdout.puts "Imported #{count} secret(s) into vault '#{vault.name}'" \
+                   "#{project ? " / #{project}" : ""}."
+    rescue RuntimeError => e
+      abort_with e.message
+    end
+
+    desc "rename OLD NEW", "Rename a secret key"
+    def rename(old_key, new_key)
+      vault = open_vault!
+      value = vault.get(old_key)
+      if value.nil?
+        abort_with "Key '#{old_key}' not found in vault '#{vault.name}'"
+        return
+      end
+      vault.set(new_key, value)
+      vault.delete(old_key)
+      $stdout.puts "Renamed '#{old_key}' → '#{new_key}' in vault '#{vault.name}'"
+    end
+
+    desc "copy KEY", "Copy a secret to another vault"
+    method_option :to, required: true, type: :string, desc: "Destination vault name"
+    def copy(key)
+      src_vault = open_vault!
+      value     = src_vault.get(key)
+      if value.nil?
+        abort_with "Key '#{key}' not found in vault '#{src_vault.name}'"
+        return
+      end
+
+      dst_vault = open_vault_by_name!(options[:to])
+      dst_vault.set(key, value)
+      $stdout.puts "Copied '#{key}' from '#{src_vault.name}' to '#{dst_vault.name}'"
+    end
+
     desc "switch [VAULT]", "Switch the default vault (or show current)"
     def switch(vault_name = nil)
       if vault_name.nil?
@@ -614,6 +679,25 @@ module LocalVault
         $stdout.puts "  #{GROUP_STYLE.render("ungrouped")}"
         $stdout.puts lipgloss_table(ungrouped.sort.to_h, reveal: reveal)
         $stdout.puts
+      end
+    end
+
+    def parse_import_file(file)
+      ext = File.extname(file).downcase
+      case ext
+      when ".json"
+        require "json"
+        JSON.parse(File.read(file))
+      when ".yml", ".yaml"
+        require "yaml"
+        YAML.safe_load(File.read(file)) || {}
+      else
+        # Treat as .env regardless of extension
+        File.readlines(file, chomp: true).each_with_object({}) do |line, h|
+          next if line.strip.empty? || line.strip.start_with?("#")
+          key, val = line.split("=", 2)
+          h[key.strip] = val.to_s.strip if key
+        end
       end
     end
 

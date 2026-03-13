@@ -224,6 +224,145 @@ class CLITest < Minitest::Test
     assert_includes out, "default"
   end
 
+  # --- import ---
+
+  def test_import_env_file
+    vault = create_test_vault("default")
+    env_file = File.join(@test_home, "test.env")
+    File.write(env_file, "SECRET_KEY=abc123\nDATABASE_URL=postgres://localhost\n")
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(["import", env_file]) }
+      assert_includes out, "2"
+    end
+    assert_equal "abc123", vault.get("SECRET_KEY")
+    assert_equal "postgres://localhost", vault.get("DATABASE_URL")
+  end
+
+  def test_import_env_file_with_project
+    vault = create_test_vault("default")
+    env_file = File.join(@test_home, "test.env")
+    File.write(env_file, "SECRET_KEY=abc123\n")
+    with_session("default") do
+      capture_io { LocalVault::CLI.start(["import", env_file, "--project", "myapp"]) }
+    end
+    assert_equal "abc123", vault.get("myapp.SECRET_KEY")
+  end
+
+  def test_import_json_file
+    vault = create_test_vault("default")
+    json_file = File.join(@test_home, "secrets.json")
+    File.write(json_file, JSON.generate({ "API_KEY" => "xyz", "TOKEN" => "tok" }))
+    with_session("default") do
+      capture_io { LocalVault::CLI.start(["import", json_file]) }
+    end
+    assert_equal "xyz", vault.get("API_KEY")
+  end
+
+  def test_import_nested_json
+    vault = create_test_vault("default")
+    json_file = File.join(@test_home, "secrets.json")
+    File.write(json_file, JSON.generate({ "platepose" => { "DB" => "postgres://localhost" } }))
+    with_session("default") do
+      capture_io { LocalVault::CLI.start(["import", json_file]) }
+    end
+    assert_equal "postgres://localhost", vault.get("platepose.DB")
+  end
+
+  def test_import_yaml_file
+    vault = create_test_vault("default")
+    yaml_file = File.join(@test_home, "secrets.yml")
+    File.write(yaml_file, "SECRET: mysecret\n")
+    with_session("default") do
+      capture_io { LocalVault::CLI.start(["import", yaml_file]) }
+    end
+    assert_equal "mysecret", vault.get("SECRET")
+  end
+
+  def test_import_skips_comments_and_blanks_in_env
+    vault = create_test_vault("default")
+    env_file = File.join(@test_home, "test.env")
+    File.write(env_file, "# comment\n\nKEY=value\n")
+    with_session("default") do
+      capture_io { LocalVault::CLI.start(["import", env_file]) }
+    end
+    assert_equal "value", vault.get("KEY")
+    assert_nil vault.get("# comment")
+  end
+
+  def test_import_errors_on_missing_file
+    create_test_vault("default")
+    with_session("default") do
+      _, err = capture_io { LocalVault::CLI.start(["import", "/nonexistent/file.env"]) }
+      assert_includes err, "not found"
+    end
+  end
+
+  # --- rename ---
+
+  def test_rename_key
+    vault = create_test_vault("default")
+    vault.set("OLD_KEY", "myvalue")
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[rename OLD_KEY NEW_KEY]) }
+      assert_includes out, "NEW_KEY"
+    end
+    assert_equal "myvalue", vault.get("NEW_KEY")
+    assert_nil vault.get("OLD_KEY")
+  end
+
+  def test_rename_nested_key
+    vault = create_test_vault("default")
+    vault.set("app.OLD", "val")
+    with_session("default") do
+      capture_io { LocalVault::CLI.start(%w[rename app.OLD app.NEW]) }
+    end
+    assert_equal "val", vault.get("app.NEW")
+    assert_nil vault.get("app.OLD")
+  end
+
+  def test_rename_errors_if_key_not_found
+    create_test_vault("default")
+    with_session("default") do
+      _, err = capture_io { LocalVault::CLI.start(%w[rename MISSING NEW_KEY]) }
+      assert_includes err, "MISSING"
+    end
+  end
+
+  # --- copy ---
+
+  def test_copy_key_to_another_vault
+    src = create_test_vault("default")
+    dst = create_test_vault("staging")
+    src.set("API_KEY", "secret")
+    cache_vault_session("staging")
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[copy API_KEY --to staging]) }
+      assert_includes out, "API_KEY"
+    end
+    assert_equal "secret", dst.get("API_KEY")
+  end
+
+  def test_copy_nested_key_to_another_vault
+    src = create_test_vault("default")
+    dst = create_test_vault("staging")
+    src.set("app.DB", "postgres://localhost")
+    cache_vault_session("staging")
+    with_session("default") do
+      capture_io { LocalVault::CLI.start(%w[copy app.DB --to staging]) }
+    end
+    assert_equal "postgres://localhost", dst.get("app.DB")
+  end
+
+  def test_copy_errors_if_source_key_missing
+    create_test_vault("default")
+    create_test_vault("staging")
+    cache_vault_session("staging")
+    with_session("default") do
+      _, err = capture_io { LocalVault::CLI.start(%w[copy MISSING --to staging]) }
+      assert_includes err, "MISSING"
+    end
+  end
+
   # --- demo ---
 
   def test_demo_creates_four_vaults
@@ -567,6 +706,12 @@ class CLITest < Minitest::Test
     yield
   ensure
     ENV.delete("LOCALVAULT_SESSION")
+  end
+
+  def cache_vault_session(vault_name, passphrase = test_passphrase)
+    store = LocalVault::Store.new(vault_name)
+    master_key = LocalVault::Crypto.derive_master_key(passphrase, store.salt)
+    LocalVault::SessionCache.set(vault_name, master_key)
   end
 
   def stub_passphrase(passphrase)
