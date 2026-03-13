@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    localvault (0.9.1)
+    localvault (0.9.5)
       base64
       lipgloss (~> 0.2)
       rbnacl (~> 7.1)
@@ -13,7 +13,10 @@ GEM
     base64 (0.3.0)
     ffi (1.17.3)
     ffi (1.17.3-arm64-darwin)
+    ffi (1.17.3-x86_64-linux-gnu)
+    lipgloss (0.2.2)
     lipgloss (0.2.2-arm64-darwin)
+    lipgloss (0.2.2-x86_64-linux-gnu)
     minitest (5.27.0)
     rake (13.3.1)
     rbnacl (7.1.2)
@@ -22,6 +25,8 @@ GEM
 
 PLATFORMS
   arm64-darwin
+  ruby
+  x86_64-linux
 
 DEPENDENCIES
   localvault!
