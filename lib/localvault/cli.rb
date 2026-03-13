@@ -32,14 +32,43 @@ module LocalVault
       abort_with e.message
     end
 
-    desc "set KEY VALUE", "Store a secret"
+    desc "set KEY VALUE", "Store a secret (supports dot-notation for nested keys)"
+    long_desc <<~DESC
+      Store a secret in the current vault.
+
+      FLAT KEY (simple):
+\x05    localvault set DATABASE_URL postgres://localhost/myapp
+\x05    localvault set STRIPE_KEY sk_live_abc123
+
+      NESTED KEY (dot-notation for team/multi-project vaults):
+\x05    localvault set platepose.DATABASE_URL postgres://...     -v intellectaco
+\x05    localvault set platepose.SECRET_KEY_BASE abc123          -v intellectaco
+\x05    localvault set inventlist.STRIPE_KEY sk_live_abc123      -v intellectaco
+
+      The dot separates project from key name. One vault can hold many projects.
+      Use `localvault show -p platepose -v vault` to view a single project.
+      Use `localvault import` to bulk-load from a .env, .json, or .yml file.
+    DESC
     def set(key, value)
       vault = open_vault!
       vault.set(key, value)
       $stdout.puts "Set #{key} in vault '#{vault.name}'"
     end
 
-    desc "get KEY", "Retrieve a secret"
+    desc "get KEY", "Retrieve a secret value by key"
+    long_desc <<~DESC
+      Print the value of a secret to stdout.
+
+      FLAT KEY:
+\x05    localvault get DATABASE_URL
+
+      NESTED KEY (dot-notation):
+\x05    localvault get platepose.DATABASE_URL     -v intellectaco
+\x05    localvault get platepose.SECRET_KEY_BASE  -v intellectaco
+
+      Output is the raw value — safe to use in scripts:
+\x05    export DB=$(localvault get platepose.DATABASE_URL -v intellectaco)
+    DESC
     def get(key)
       vault = open_vault!
       value = vault.get(key)
@@ -50,13 +79,41 @@ module LocalVault
       $stdout.puts value
     end
 
-    desc "list", "List all keys"
+    desc "list", "List all secret keys in the vault"
+    long_desc <<~DESC
+      Print all secret keys, one per line. Nested keys use dot-notation.
+
+\x05    localvault list
+\x05    localvault list -v intellectaco
+
+      Example output for a team vault:
+\x05    platepose.DATABASE_URL
+\x05    platepose.SECRET_KEY_BASE
+\x05    platepose.RAILS_MASTER_KEY
+\x05    inventlist.DATABASE_URL
+\x05    inventlist.STRIPE_KEY
+
+      Use `localvault show` for a formatted table, or `localvault show -p PROJECT`
+      to filter to a single project.
+    DESC
     def list
       vault = open_vault!
       vault.list.each { |key| $stdout.puts key }
     end
 
-    desc "delete KEY", "Remove a secret"
+    desc "delete KEY", "Remove a secret or entire project group"
+    long_desc <<~DESC
+      Delete a single key or an entire project group.
+
+      DELETE ONE KEY:
+\x05    localvault delete STRIPE_KEY
+\x05    localvault delete platepose.DATABASE_URL  -v intellectaco
+
+      DELETE AN ENTIRE PROJECT GROUP (removes all keys under project.*):
+\x05    localvault delete platepose  -v intellectaco
+
+      This is permanent — use `localvault show` to verify before deleting.
+    DESC
     def delete(key)
       vault = open_vault!
       deleted = vault.delete(key)
@@ -67,15 +124,48 @@ module LocalVault
       $stdout.puts "Deleted #{key} from vault '#{vault.name}'"
     end
 
-    desc "env", "Export secrets as shell variables"
-    method_option :project, aliases: "-p", type: :string, desc: "Export only this project group"
+    desc "env", "Export secrets as shell variable assignments"
+    long_desc <<~DESC
+      Print `export KEY=value` lines for use with eval or shell sourcing.
+
+      FLAT VAULT:
+\x05    eval $(localvault env)
+\x05    eval $(localvault env -v staging)
+
+      TEAM VAULT — one project (keys exported without prefix):
+\x05    eval $(localvault env -p platepose -v intellectaco)
+\x05    # → export DATABASE_URL=...  export SECRET_KEY_BASE=...
+
+      TEAM VAULT — all projects (keys prefixed to avoid collisions):
+\x05    eval $(localvault env -v intellectaco)
+\x05    # → export PLATEPOSE__DATABASE_URL=...  export INVENTLIST__DATABASE_URL=...
+
+      Use `localvault exec` to inject directly into a subprocess without eval.
+    DESC
+    method_option :project, aliases: "-p", type: :string, desc: "Export only this project group (no prefix)"
     def env
       vault = open_vault!
       $stdout.puts vault.export_env(project: options[:project])
     end
 
-    desc "exec -- CMD", "Run command with secrets injected as env vars"
-    method_option :project, aliases: "-p", type: :string, desc: "Inject only this project group"
+    desc "exec -- CMD", "Run a command with secrets injected as environment variables"
+    long_desc <<~DESC
+      Run any command with vault secrets in its environment. The `--` separator
+      is required to prevent localvault from consuming the command's own flags.
+
+      FLAT VAULT:
+\x05    localvault exec -- rails server
+\x05    localvault exec -- bundle exec rspec
+
+      TEAM VAULT — one project (keys injected without prefix):
+\x05    localvault exec -p platepose -v intellectaco -- rails server
+\x05    # → DATABASE_URL, SECRET_KEY_BASE, RAILS_MASTER_KEY in env
+
+      TEAM VAULT — all projects (keys prefixed to avoid collisions):
+\x05    localvault exec -v intellectaco -- your-script
+\x05    # → PLATEPOSE__DATABASE_URL, INVENTLIST__DATABASE_URL, etc.
+    DESC
+    method_option :project, aliases: "-p", type: :string, desc: "Inject only this project group (no prefix)"
     def exec(*cmd)
       vault = open_vault!
       env_vars = vault.env_hash(project: options[:project])
@@ -136,8 +226,22 @@ module LocalVault
       abort_with "Wrong passphrase for vault '#{vault_name}'"
     end
 
-    desc "show", "Display secrets in a table (masked by default)"
-    method_option :group,   type: :boolean, default: false, desc: "Group by key prefix"
+    desc "show", "Display secrets in a formatted table (masked by default)"
+    long_desc <<~DESC
+      Show secrets in the current vault. Values are masked by default.
+      Running this command also caches your passphrase in Keychain for 8 hours.
+
+      FLAT VAULT (simple keys):
+\x05    localvault show
+\x05    localvault show --reveal        # show full values
+\x05    localvault show --group         # group by prefix: STRIPE_KEY, STRIPE_SECRET → STRIPE
+
+      TEAM VAULT (dot-notation — grouped automatically):
+\x05    localvault show -v intellectaco               # all projects
+\x05    localvault show -p platepose -v intellectaco  # one project only
+\x05    localvault show -p platepose -v intellectaco --reveal
+    DESC
+    method_option :group,   type: :boolean, default: false, desc: "Group flat keys by common prefix"
     method_option :reveal,  type: :boolean, default: false, desc: "Show full values instead of masking"
     method_option :project, aliases: "-p", type: :string,   desc: "Show only this project group"
     def show
@@ -461,8 +565,29 @@ module LocalVault
       abort_with e.message
     end
 
-    desc "import FILE", "Import secrets from a .env, .json, or .yml file"
-    method_option :project, aliases: "-p", type: :string, desc: "Import keys under this project group"
+    desc "import FILE", "Bulk-import secrets from a .env, .json, or .yml file"
+    long_desc <<~DESC
+      Import all secrets from a file into a vault. Supports .env, .json, and .yml.
+
+      FLAT IMPORT (into default vault):
+\x05    localvault import .env
+\x05    localvault import secrets.json
+
+      SCOPED IMPORT (into a project group in a team vault):
+\x05    localvault import .env -p platepose -v intellectaco
+\x05    # → stores each key as platepose.KEY
+
+      NESTED JSON/YAML (auto-imported as project groups):
+\x05    localvault import all-secrets.json -v intellectaco
+\x05    # { "platepose": { "DB": "..." }, "inventlist": { "DB": "..." } }
+\x05    # → platepose.DB, inventlist.DB
+
+      FILE FORMATS:
+\x05    .env    KEY=value lines, # comments ignored
+\x05    .json   flat {"KEY":"val"} or nested {"project":{"KEY":"val"}}
+\x05    .yml    flat KEY: value or nested project:\n  KEY: value
+    DESC
+    method_option :project, aliases: "-p", type: :string, desc: "Namespace all imported keys under this project"
     def import(file)
       unless File.exist?(file)
         abort_with "File not found: #{file}"
@@ -498,7 +623,19 @@ module LocalVault
       abort_with e.message
     end
 
-    desc "rename OLD NEW", "Rename a secret key"
+    desc "rename OLD NEW", "Rename a secret key (supports dot-notation)"
+    long_desc <<~DESC
+      Rename a key in-place. The value is preserved; only the key name changes.
+
+      FLAT KEYS:
+\x05    localvault rename OLD_NAME NEW_NAME
+
+      NESTED KEYS:
+\x05    localvault rename platepose.DB_URL platepose.DATABASE_URL -v intellectaco
+
+      MOVE ACROSS PROJECTS:
+\x05    localvault rename staging.SECRET_KEY_BASE production.SECRET_KEY_BASE -v intellectaco
+    DESC
     def rename(old_key, new_key)
       vault = open_vault!
       value = vault.get(old_key)
@@ -511,7 +648,19 @@ module LocalVault
       $stdout.puts "Renamed '#{old_key}' → '#{new_key}' in vault '#{vault.name}'"
     end
 
-    desc "copy KEY", "Copy a secret to another vault"
+    desc "copy KEY --to VAULT", "Copy a secret to another vault"
+    long_desc <<~DESC
+      Copy a secret from the current vault to a different vault.
+      Great for promoting secrets from staging → production.
+
+      COPY A FLAT KEY:
+\x05    localvault copy STRIPE_KEY --to production
+
+      COPY A NESTED KEY (key name preserved in destination):
+\x05    localvault copy platepose.DATABASE_URL --to production -v intellectaco
+
+      Use `localvault rename` afterwards if you need a different key name.
+    DESC
     method_option :to, required: true, type: :string, desc: "Destination vault name"
     def copy(key)
       src_vault = open_vault!
