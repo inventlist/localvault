@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+
+      - name: Run tests
+        run: bundle exec rake test
+
+      - name: Build gem
+        run: gem build localvault.gemspec
+
+      - name: Push to RubyGems
+        env:
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
+        run: gem push localvault-*.gem
+
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          URL="https://github.com/inventlist/localvault/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+
+          # Wait a moment for GitHub to make the tarball available
+          sleep 5
+          SHA256=$(curl -sL "$URL" | shasum -a 256 | cut -d' ' -f1)
+
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/inventlist/homebrew-tap.git" tap
+          cd tap
+
+          sed -i "s|url \".*\"|url \"${URL}\"|" Formula/localvault.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/localvault.rb
+
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add Formula/localvault.rb
+          git commit -m "localvault ${VERSION}"
+          git push

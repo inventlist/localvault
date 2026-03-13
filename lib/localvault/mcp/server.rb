@@ -17,6 +17,10 @@ module LocalVault
       end
 
       def start
+        vault_label = @vault ? "vault=#{@vault.name}" : "no vault (set LOCALVAULT_SESSION)"
+        $stderr.puts "[localvault-mcp] started  v#{LocalVault::VERSION}  #{vault_label}"
+        $stderr.flush
+
         @input.each_line do |line|
           line = line.strip
           next if line.empty?
@@ -27,6 +31,9 @@ module LocalVault
             @output.flush
           end
         end
+
+        $stderr.puts "[localvault-mcp] stopped"
+        $stderr.flush
       end
 
       def handle_message(json_string)
