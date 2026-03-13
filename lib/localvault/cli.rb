@@ -439,6 +439,29 @@ module LocalVault
       abort_with e.message
     end
 
+    desc "switch [VAULT]", "Switch the default vault (or show current)"
+    def switch(vault_name = nil)
+      if vault_name.nil?
+        current = Config.default_vault
+        $stdout.puts "Current vault: #{current}"
+        $stdout.puts
+        $stdout.puts "Available vaults:"
+        Store.list_vaults.each do |name|
+          marker = name == current ? "  ← current" : ""
+          $stdout.puts "  #{name}#{marker}"
+        end
+        return
+      end
+
+      unless Store.new(vault_name).exists?
+        abort_with "Vault '#{vault_name}' does not exist. Run: localvault init #{vault_name}"
+        return
+      end
+
+      Config.default_vault = vault_name
+      $stdout.puts "Switched to vault '#{vault_name}'"
+    end
+
     desc "version", "Print version"
     def version
       $stdout.puts "localvault #{VERSION}"

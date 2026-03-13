@@ -196,6 +196,34 @@ class CLITest < Minitest::Test
     assert_match(/no vaults/i, out)
   end
 
+  # --- switch ---
+
+  def test_switch_changes_default_vault
+    create_test_vault("default")
+    create_test_vault("intellectaco")
+    capture_io { LocalVault::CLI.start(%w[switch intellectaco]) }
+    assert_equal "intellectaco", LocalVault::Config.default_vault
+  end
+
+  def test_switch_shows_confirmation
+    create_test_vault("default")
+    create_test_vault("staging")
+    out, = capture_io { LocalVault::CLI.start(%w[switch staging]) }
+    assert_includes out, "staging"
+  end
+
+  def test_switch_errors_if_vault_does_not_exist
+    _, err = capture_io { LocalVault::CLI.start(%w[switch nonexistent]) }
+    assert_includes err, "nonexistent"
+  end
+
+  def test_switch_no_arg_shows_current_vault
+    create_test_vault("default")
+    LocalVault::Config.default_vault = "default"
+    out, = capture_io { LocalVault::CLI.start(%w[switch]) }
+    assert_includes out, "default"
+  end
+
   # --- demo ---
 
   def test_demo_creates_four_vaults
