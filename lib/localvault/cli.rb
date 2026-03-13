@@ -67,17 +67,19 @@ module LocalVault
       $stdout.puts "Deleted #{key} from vault '#{vault.name}'"
     end
 
-    desc "env", "Export all secrets as shell variables"
+    desc "env", "Export secrets as shell variables"
+    method_option :project, aliases: "-p", type: :string, desc: "Export only this project group"
     def env
       vault = open_vault!
-      $stdout.puts vault.export_env
+      $stdout.puts vault.export_env(project: options[:project])
     end
 
     desc "exec -- CMD", "Run command with secrets injected as env vars"
+    method_option :project, aliases: "-p", type: :string, desc: "Inject only this project group"
     def exec(*cmd)
       vault = open_vault!
-      env_hash = vault.all
-      Kernel.exec(env_hash, *cmd)
+      env_vars = vault.env_hash(project: options[:project])
+      Kernel.exec(env_vars, *cmd)
     end
 
     desc "vaults", "List all vaults with secret counts"
@@ -135,8 +137,9 @@ module LocalVault
     end
 
     desc "show", "Display secrets in a table (masked by default)"
-    method_option :group,  type: :boolean, default: false, desc: "Group by key prefix"
-    method_option :reveal, type: :boolean, default: false, desc: "Show full values instead of masking"
+    method_option :group,   type: :boolean, default: false, desc: "Group by key prefix"
+    method_option :reveal,  type: :boolean, default: false, desc: "Show full values instead of masking"
+    method_option :project, aliases: "-p", type: :string,   desc: "Show only this project group"
     def show
       vault = open_vault!
       secrets = vault.all
@@ -146,7 +149,14 @@ module LocalVault
         return
       end
 
-      if options[:group]
+      if options[:project]
+        group = secrets[options[:project]]
+        unless group.is_a?(Hash)
+          abort_with "No project '#{options[:project]}' in vault '#{vault.name}'"
+          return
+        end
+        render_table(group.sort.to_h, "#{vault.name}/#{options[:project]}", reveal: options[:reveal])
+      elsif options[:group] || secrets.values.any? { |v| v.is_a?(Hash) }
         render_grouped_table(secrets, vault.name, reveal: options[:reveal])
       else
         render_table(secrets.sort.to_h, vault.name, reveal: options[:reveal])
@@ -551,15 +561,28 @@ module LocalVault
     end
 
     def render_grouped_table(secrets, vault_name, reveal:)
-      groups    = secrets.group_by { |k, _| k.include?("_") ? k.split("_").first : nil }
-      ungrouped = groups.delete(nil) || []
-      total     = secrets.size
+      # Separate true nested groups (Hash values) from flat keys
+      nested   = secrets.select { |_, v| v.is_a?(Hash) }
+      flat     = secrets.reject { |_, v| v.is_a?(Hash) }
 
+      # For flat keys, group by underscore prefix (legacy --group behaviour)
+      prefix_groups = flat.group_by { |k, _| k.include?("_") ? k.split("_").first : nil }
+      ungrouped     = prefix_groups.delete(nil) || []
+
+      total = secrets.sum { |_, v| v.is_a?(Hash) ? v.size : 1 }
       $stdout.puts "#{VAULT_STYLE.render("Vault: #{vault_name}")}  #{COUNT_STYLE.render("(#{total} secret#{total == 1 ? "" : "s"})")}"
       $stdout.puts
 
-      groups.sort.each do |prefix, pairs|
-        $stdout.puts "  #{GROUP_STYLE.render("#{prefix}")}  #{COUNT_STYLE.render("(#{pairs.size})")}"
+      # Render nested project groups first
+      nested.sort.each do |project, pairs|
+        $stdout.puts "  #{GROUP_STYLE.render(project)}  #{COUNT_STYLE.render("(#{pairs.size})")}"
+        $stdout.puts lipgloss_table(pairs.sort.to_h, reveal: reveal)
+        $stdout.puts
+      end
+
+      # Render flat prefix groups
+      prefix_groups.sort.each do |prefix, pairs|
+        $stdout.puts "  #{GROUP_STYLE.render(prefix)}  #{COUNT_STYLE.render("(#{pairs.size})")}"
         $stdout.puts lipgloss_table(pairs.sort.to_h, reveal: reveal)
         $stdout.puts
       end

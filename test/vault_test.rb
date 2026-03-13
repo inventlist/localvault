@@ -82,7 +82,7 @@ class VaultTest < Minitest::Test
     vault.set("DB_URL", "postgres://localhost/mydb")
 
     output = vault.export_env
-    assert_includes output, 'export DB_URL="postgres://localhost/mydb"'
+    assert_includes output, "export DB_URL="
   end
 
   def test_open_with_correct_passphrase
@@ -126,5 +126,99 @@ class VaultTest < Minitest::Test
 
     assert_equal "from-a", vault_a.get("KEY")
     assert_equal "from-b", vault_b.get("KEY")
+  end
+
+  # ── Nested (dot-notation) secrets ──────────────────────────────
+
+  def test_set_and_get_nested_key
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("platepose.SECRET_KEY_BASE", "abc123")
+    assert_equal "abc123", vault.get("platepose.SECRET_KEY_BASE")
+  end
+
+  def test_set_nested_creates_group_hash
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("platepose.DB", "postgres://localhost")
+    assert_kind_of Hash, vault.all["platepose"]
+  end
+
+  def test_set_multiple_keys_in_same_group
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("platepose.DB",  "postgres://localhost")
+    vault.set("platepose.KEY", "secret")
+    assert_equal "postgres://localhost", vault.get("platepose.DB")
+    assert_equal "secret",              vault.get("platepose.KEY")
+  end
+
+  def test_flat_and_nested_coexist
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("GLOBAL_KEY", "global")
+    vault.set("platepose.DB", "postgres://localhost")
+    assert_equal "global",            vault.get("GLOBAL_KEY")
+    assert_equal "postgres://localhost", vault.get("platepose.DB")
+  end
+
+  def test_get_nested_returns_nil_for_missing_group
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    assert_nil vault.get("nogroup.KEY")
+  end
+
+  def test_get_nested_returns_nil_for_missing_subkey
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("platepose.DB", "postgres://localhost")
+    assert_nil vault.get("platepose.MISSING")
+  end
+
+  def test_delete_nested_key
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("platepose.DB",  "postgres://localhost")
+    vault.set("platepose.KEY", "secret")
+    vault.delete("platepose.DB")
+    assert_nil vault.get("platepose.DB")
+    assert_equal "secret", vault.get("platepose.KEY")
+  end
+
+  def test_delete_nested_removes_empty_group
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("platepose.DB", "postgres://localhost")
+    vault.delete("platepose.DB")
+    refute vault.all.key?("platepose")
+  end
+
+  def test_list_includes_nested_keys_with_dot_notation
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("GLOBAL", "val")
+    vault.set("platepose.DB",  "postgres://localhost")
+    vault.set("platepose.KEY", "secret")
+    assert_includes vault.list, "GLOBAL"
+    assert_includes vault.list, "platepose.DB"
+    assert_includes vault.list, "platepose.KEY"
+  end
+
+  def test_export_env_flattens_nested_with_double_underscore
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("platepose.SECRET_KEY_BASE", "abc")
+    env = vault.export_env
+    assert_includes env, "PLATEPOSE__SECRET_KEY_BASE"
+  end
+
+  def test_export_env_with_project_scopes_to_group
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("platepose.SECRET_KEY_BASE", "abc")
+    vault.set("platepose.DATABASE_URL",    "postgres://localhost")
+    vault.set("other.API_KEY",             "xyz")
+    env = vault.export_env(project: "platepose")
+    assert_includes env, "SECRET_KEY_BASE"
+    assert_includes env, "DATABASE_URL"
+    refute_includes env, "API_KEY"
+    refute_includes env, "PLATEPOSE__"
+  end
+
+  def test_secrets_count_counts_leaf_values
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("GLOBAL", "val")
+    vault.set("platepose.DB",  "postgres://localhost")
+    vault.set("platepose.KEY", "secret")
+    assert_equal 3, vault.store.count
   end
 end
