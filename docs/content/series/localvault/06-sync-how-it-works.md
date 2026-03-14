@@ -1,126 +1,100 @@
 ---
 title: LocalVault Sync — How It Works
-description: Technical reference for vault sync across devices. Keypair generation, InventList API, R2 storage, push/pull/status commands, and team key slots.
+description: Sync your encrypted vaults across machines via InventList. Zero-knowledge — your secrets are encrypted before they leave your machine.
 type: doc
 ---
 
 # LocalVault Sync — How It Works
 
-> This feature is in development. See the [backlog](../../backlog/vault-sync/backlog.md) for status.
-
 LocalVault sync stores your encrypted vault on Cloudflare R2 via InventList. Your secrets are encrypted before they leave your machine. InventList stores opaque encrypted bytes — it cannot read your secrets.
 
-## Setup
+## Setup (one time)
 
 ```bash
-# 1. Generate your keypair (one time per user)
+# 1. Generate your keypair — creates your X25519 identity
 localvault keygen
 
-# 2. Login to InventList — publishes your public key to your profile
-localvault login <your-inventlist-api-token>
+# 2. Log in with your InventList API token
+#    This validates your token and publishes your public key to your profile
+localvault login <your-token>
 ```
 
-Get your API token from inventlist.com/settings.
+Get your API token at inventlist.com/settings.
 
-## Sync commands
+## Push a vault to the cloud
 
 ```bash
-# Push default vault to the cloud
+# Push default vault
 localvault sync push
 
 # Push a named vault
-localvault sync push -v intellectaco
+localvault sync push production
+localvault sync push intellectaco
+```
 
-# Pull to this machine
+The encrypted vault is bundled (meta + encrypted secrets) and uploaded to R2. InventList stores the blob, a SHA256 checksum, and the timestamp. It never decrypts anything.
+
+## Pull to another machine
+
+```bash
+# Pull default vault (will error if it exists locally — use --force to overwrite)
 localvault sync pull
-localvault sync pull -v intellectaco
 
-# Check sync state across all vaults
+# Pull a named vault
+localvault sync pull production
+
+# Overwrite existing local vault
+localvault sync pull production --force
+```
+
+After pulling, unlock the vault with your passphrase:
+
+```bash
+eval $(localvault unlock -v production)
+```
+
+## Check sync status
+
+```bash
 localvault sync status
 ```
 
-### Sync status output
+Output:
 
 ```
-Vault            Status      Last synced
-──────────────   ─────────   ─────────────────────
-default          synced      2 hours ago
-intellectaco     ahead       never pushed
-staging          behind      3 days ago
+Vault        Status       Synced At
+──────────   ──────────   ─────────
+default      synced       2026-03-15
+production   local only   —
+staging      remote only  2026-03-12
 ```
 
-States:
-- **synced** — local and remote checksums match
-- **ahead** — local is newer than remote (needs push)
-- **behind** — remote is newer than local (needs pull)
-- **local-only** — exists locally, never pushed
-- **remote-only** — exists in cloud, not pulled yet
+Status values:
+- **synced** — exists locally and in cloud
+- **local only** — exists locally, never pushed
+- **remote only** — in cloud, not pulled yet
 
 ## What gets stored
 
-Each vault sync in R2:
-- **Key**: `<user_id>/<vault_name>.vault`
-- **Content**: the encrypted vault blob (already encrypted by libsodium — no double-encryption)
+On R2 (encrypted blob):
+- Path: `<user_id>/<vault_name>.vault`
+- Content: JSON bundle with base64-encoded `meta.yml` + `secrets.enc` — both already encrypted
 
-Each vault sync in the database (metadata only):
-- vault name, checksum (sha256), size, last synced time
+In the database (metadata only — never sensitive):
+- Vault name, SHA256 checksum, file size, last synced timestamp
 
-InventList never stores your passphrase or private key.
-
-## Team access
-
-Add a teammate by their InventList handle. LocalVault looks up their public key from their profile and creates an encrypted key slot for them:
-
-```bash
-localvault team add @teammate -v intellectaco
-```
-
-The teammate can then pull and unlock the vault with their own private key — no passphrase sharing required.
-
-```bash
-# List who has access
-localvault team list -v intellectaco
-
-# Remove access
-localvault team remove @teammate -v intellectaco
-
-# Remove + rotate master key (full revocation)
-localvault team remove @teammate -v intellectaco --rotate
-```
-
-## Key slot format
-
-The vault file uploaded to R2 has a small header prepended:
-
-```
-[header length: 4 bytes]
-[key slots: JSON, one entry per authorized user]
-  {
-    "handle": "@nauman",
-    "key_id": "...",
-    "encrypted_master_key": "base64..."  // master key encrypted with user's public key
-  }
-[vault blob: libsodium encrypted secrets]
-```
-
-When you pull, LocalVault finds your key slot, decrypts the master key with your private key, then uses the master key to decrypt the vault blob.
+InventList never stores your passphrase, private key, or unencrypted secrets.
 
 ## Security properties
 
 | Property | Guarantee |
 |----------|-----------|
-| Server access | InventList cannot read your secrets — ever |
+| Server access | InventList cannot read your secrets |
 | Transport | HTTPS only, Bearer token auth |
-| Revocation | Remove key slot — user cannot pull new versions |
-| Full revocation | `--rotate` re-encrypts with new master key |
+| Encryption | libsodium (Argon2id + XSalsa20-Poly1305) |
 | Passphrase | Never transmitted, never stored server-side |
 | Private key | Never leaves your machine |
 
-## Conflict handling
+## Team access (coming soon)
 
-Last-write-wins for v1. If the remote is newer than local, push and pull both warn:
-
-```
-Remote vault 'intellectaco' is newer than local (pushed 1 hour ago).
-Use --force to overwrite, or run: localvault sync pull first.
-```
+Team vaults will let you add collaborators by InventList handle. LocalVault will look up their public key from their profile and create an encrypted key slot — no passphrase sharing required. See [VS-009/010/011](../../backlog/vault-sync/backlog.md) in the backlog.

@@ -119,3 +119,23 @@ localvault reset
 ```
 
 **All secrets are permanently deleted. There is no recovery — that's the point.**
+
+## Sync to the cloud (optional)
+
+Back up and sync your vault across machines via InventList — free, zero-knowledge:
+
+```bash
+# Log in with your InventList API token
+localvault login <your-token>
+
+# Push your vault to the cloud
+localvault sync push
+
+# Pull it on another machine
+localvault sync pull
+
+# Check sync status across all vaults
+localvault sync status
+```
+
+See [LocalVault Sync — How It Works](06-sync-how-it-works.md) for the full guide.
