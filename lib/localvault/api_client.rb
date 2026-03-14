@@ -76,6 +76,26 @@ module LocalVault
       get("/sites/#{site_slug}/crew/public_keys")
     end
 
+    # GET /api/v1/vaults
+    def list_vaults
+      get("/vaults")
+    end
+
+    # PUT /api/v1/vaults/:name — sends raw binary blob, returns JSON
+    def push_vault(name, blob)
+      request_binary(:put, "/vaults/#{URI.encode_uri_component(name)}", blob)
+    end
+
+    # GET /api/v1/vaults/:name — returns raw binary blob
+    def pull_vault(name)
+      request_raw(:get, "/vaults/#{URI.encode_uri_component(name)}")
+    end
+
+    # DELETE /api/v1/vaults/:name
+    def delete_vault(name)
+      delete("/vaults/#{URI.encode_uri_component(name)}")
+    end
+
     private
 
     def get(path)
@@ -123,6 +143,50 @@ module LocalVault
         raise ApiError.new(err || "HTTP #{res.code}", status: res.code.to_i)
       end
       JSON.parse(res.body)
+    rescue Errno::ECONNREFUSED, SocketError => e
+      raise ApiError.new("Cannot connect to #{@base_url}: #{e.message}")
+    end
+
+    # PUT /api/v1/vaults/:name — sends raw binary body, expects JSON response
+    def request_binary(method, path, blob)
+      uri  = URI("#{@base_url}#{BASE_PATH}#{path}")
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = uri.scheme == "https"
+
+      req_class = { put: Net::HTTP::Put }.fetch(method)
+      req = req_class.new(uri.request_uri)
+      req["Authorization"] = "Bearer #{@token}"
+      req["Content-Type"]  = "application/octet-stream"
+      req["Accept"]        = "application/json"
+      req.body = blob
+
+      res = http.request(req)
+      unless res.is_a?(Net::HTTPSuccess)
+        err = begin JSON.parse(res.body)["error"] rescue nil end
+        raise ApiError.new(err || "HTTP #{res.code}", status: res.code.to_i)
+      end
+      JSON.parse(res.body)
+    rescue Errno::ECONNREFUSED, SocketError => e
+      raise ApiError.new("Cannot connect to #{@base_url}: #{e.message}")
+    end
+
+    # GET /api/v1/vaults/:name — returns raw binary body
+    def request_raw(method, path)
+      uri  = URI("#{@base_url}#{BASE_PATH}#{path}")
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = uri.scheme == "https"
+
+      req_class = { get: Net::HTTP::Get }.fetch(method)
+      req = req_class.new(uri.request_uri)
+      req["Authorization"] = "Bearer #{@token}"
+      req["Accept"]        = "application/octet-stream"
+
+      res = http.request(req)
+      unless res.is_a?(Net::HTTPSuccess)
+        err = begin JSON.parse(res.body)["error"] rescue nil end
+        raise ApiError.new(err || "HTTP #{res.code}", status: res.code.to_i)
+      end
+      res.body
     rescue Errno::ECONNREFUSED, SocketError => e
       raise ApiError.new("Cannot connect to #{@base_url}: #{e.message}")
     end

@@ -421,13 +421,15 @@ module LocalVault
       $stdout.puts "  localvault exec -- env | grep -E 'DATABASE|REDIS'"
     end
 
-    # ── Teams / sharing ──────────────────────────────────────────────
+    # ── Teams / sharing / sync ────────────────────────────────────
 
     require_relative "cli/keys"
     require_relative "cli/team"
+    require_relative "cli/sync"
 
     register(Keys, "keys", "keys SUBCOMMAND", "Manage your X25519 keypair for vault sharing")
     register(Team, "team", "team SUBCOMMAND", "Manage vault team access")
+    register(Sync, "sync", "sync SUBCOMMAND", "Sync vaults to InventList cloud")
 
     desc "keygen", "Generate your identity keypair for vault sync"
     method_option :force, type: :boolean, default: false, desc: "Overwrite existing keypair"
