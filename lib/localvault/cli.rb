@@ -429,6 +429,86 @@ module LocalVault
     register(Keys, "keys", "keys SUBCOMMAND", "Manage your X25519 keypair for vault sharing")
     register(Team, "team", "team SUBCOMMAND", "Manage vault team access")
 
+    desc "keygen", "Generate your identity keypair for vault sync"
+    method_option :force, type: :boolean, default: false, desc: "Overwrite existing keypair"
+    method_option :show,  type: :boolean, default: false, desc: "Print your existing public key"
+    def keygen
+      if options[:show]
+        unless Identity.exists?
+          $stdout.puts "No keypair found. Run: localvault keygen"
+          return
+        end
+        $stdout.puts Identity.public_key
+        return
+      end
+
+      if Identity.exists? && !options[:force]
+        $stdout.puts "Keypair already exists. Use --force to regenerate."
+        return
+      end
+
+      Config.ensure_directories!
+      Identity.generate!(force: options[:force])
+      $stdout.puts "Keypair generated."
+      $stdout.puts "Public key: #{Identity.public_key}"
+    end
+
+    desc "login [TOKEN]", "Log in to InventList — validate token, auto-keygen, publish public key"
+    method_option :status, type: :boolean, default: false, desc: "Show current login status"
+    def login(token = nil)
+      if options[:status]
+        handle = Config.inventlist_handle
+        if handle
+          $stdout.puts "Logged in as @#{handle}"
+        else
+          $stdout.puts "Not logged in. Run: localvault login TOKEN"
+        end
+        return
+      end
+
+      unless token
+        $stdout.puts "Usage: localvault login TOKEN"
+        $stdout.puts "Get your token at: https://inventlist.com/settings"
+        return
+      end
+
+      client = ApiClient.new(token: token)
+      data   = client.me
+      handle = data.dig("user", "handle")
+
+      Config.token             = token
+      Config.inventlist_handle = handle
+
+      Config.ensure_directories!
+      Identity.generate! unless Identity.exists?
+
+      client.publish_public_key(Identity.public_key)
+
+      $stdout.puts "Logged in as @#{handle}"
+      $stdout.puts "Public key published to your InventList profile."
+      $stdout.puts
+      $stdout.puts "Next: localvault sync push   # sync your vault to the cloud"
+    rescue ApiClient::ApiError => e
+      if e.status == 401
+        $stdout.puts "Invalid token. Check your token at: https://inventlist.com/settings"
+      else
+        $stdout.puts "Error connecting to InventList: #{e.message}"
+      end
+    end
+
+    desc "logout", "Log out of InventList"
+    def logout
+      unless Config.token
+        $stdout.puts "Not logged in."
+        return
+      end
+
+      handle = Config.inventlist_handle
+      Config.token             = nil
+      Config.inventlist_handle = nil
+      $stdout.puts "Logged out#{" @#{handle}" if handle}."
+    end
+
     desc "connect", "Connect to InventList for vault sharing"
     method_option :token,  required: true, type: :string, desc: "InventList API token"
     method_option :handle, required: true, type: :string, desc: "Your InventList handle"

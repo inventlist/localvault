@@ -1,0 +1,16 @@
+{
+  "series": "localvault",
+  "title": "LocalVault",
+  "subtitle": "A zero-infrastructure secrets manager built for indie makers and AI workflows",
+  "lane": "building_in_public",
+  "site_slug": "localvault",
+  "posts": [
+    { "id": "01", "file": "01-getting-started.md", "type": "doc" },
+    { "id": "02", "file": "02-organizing-secrets.md", "type": "doc" },
+    { "id": "03", "file": "03-mcp-for-ai-agents.md", "type": "doc" },
+    { "id": "04", "file": "04-why-i-built-this.md", "type": "journey" },
+    { "id": "05", "file": "05-designing-sync.md", "type": "journey" },
+    { "id": "06", "file": "06-sync-how-it-works.md", "type": "doc" },
+    { "id": "07", "file": "07-security-model.md", "type": "doc" }
+  ]
+}

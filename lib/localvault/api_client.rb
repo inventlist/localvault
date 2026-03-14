@@ -20,6 +20,11 @@ module LocalVault
       @base_url = base_url || Config.api_url
     end
 
+    # GET /api/v1/me
+    def me
+      get("/me")
+    end
+
     # GET /api/v1/users/:handle/public_key
     def get_public_key(handle)
       get("/users/#{handle}/public_key")

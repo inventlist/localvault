@@ -1,0 +1,197 @@
+{
+  "id": "vault-sync",
+  "title": "Vault Sync via InventList",
+  "objective": "Sync encrypted vaults across devices using InventList as a zero-knowledge backend with PGP-style per-user key slots.",
+  "status": "in_progress",
+  "version": "1.1",
+  "started": "2026-03-15",
+
+  "security_model": {
+    "keypair": "Curve25519 (RbNaCl Box). Private key: Keychain (macOS) or ~/.localvault/keys/identity.priv (0600). Public key on InventList profile.",
+    "vault_blob": "libsodium XSalsa20-Poly1305 encrypted — already encrypted before upload",
+    "key_slots": "Vault master key encrypted per-user with their Curve25519 public key. Prepended header on vault file.",
+    "zero_knowledge": "InventList stores encrypted blobs + metadata only. Passphrase and private keys never transmitted.",
+    "revocation": "Delete key slot = no new pulls. --rotate flag = re-encrypt master key for full revocation."
+  },
+
+  "storage": {
+    "backend": "Cloudflare R2, dedicated bucket: localvault-sync",
+    "key_pattern": "<user_id>/<vault_name>.vault",
+    "db_model": "VaultSync: user_id, name, checksum (sha256), size_bytes, synced_at, r2_key",
+    "proxy": "All R2 access proxied through Rails — CLI talks only to Rails API"
+  },
+
+  "stories": [
+    {
+      "id": "VS-001",
+      "title": "localvault keygen command",
+      "status": "in_progress",
+      "scope": "Add keygen CLI command wrapping Identity.generate!",
+      "acceptance": [
+        "localvault keygen generates Curve25519 keypair, prints public key",
+        "localvault keygen --force regenerates without error",
+        "localvault keygen --show prints public key without regenerating",
+        "Running keygen twice without --force prints error and exits non-zero"
+      ],
+      "constraints": [
+        "Uses existing Identity.generate! — no new crypto code",
+        "Private key never printed"
+      ],
+      "verify": "localvault keygen then localvault keygen --show outputs same base64 key"
+    },
+    {
+      "id": "VS-002",
+      "title": "localvault login command",
+      "status": "in_progress",
+      "scope": "Add login command: validate token via /api/v1/me, store handle, auto-keygen, publish public key",
+      "acceptance": [
+        "localvault login TOKEN validates token, stores it, prints 'Logged in as @handle'",
+        "Auto-runs keygen on first login if no keypair exists",
+        "Publishes public key to InventList profile on login",
+        "localvault logout clears token and handle from config",
+        "localvault login --status shows logged-in handle or 'Not logged in'",
+        "Invalid token shows clean error (not a stack trace)"
+      ],
+      "constraints": [
+        "Handle fetched from GET /api/v1/me — user does not need to pass it",
+        "login replaces connect for the sync workflow (connect remains for legacy share commands)"
+      ],
+      "verify": "localvault login TOKEN then check inventlist.com/@handle shows LocalVault badge"
+    },
+    {
+      "id": "VS-003",
+      "title": "InventList API — public key endpoints",
+      "status": "done",
+      "scope": "PUT /api/v1/profile/public_key and GET /api/v1/users/:handle/public_key",
+      "acceptance": [
+        "PUT /api/v1/profile/public_key updates user.public_key, requires Bearer token",
+        "GET /api/v1/users/:handle/public_key returns public key or 404",
+        "GET /api/v1/me returns handle + profile (used by login to fetch handle)"
+      ],
+      "constraints": ["Pre-existing — no code changes needed"],
+      "verify": "Already live at inventlist.com"
+    },
+    {
+      "id": "VS-004",
+      "title": "InventList — VaultSync model + R2 bucket",
+      "status": "pending",
+      "scope": "New R2 bucket + VaultSync ActiveRecord model + R2 upload/download service",
+      "acceptance": [
+        "R2 bucket localvault-sync created, credentials in Rails credentials",
+        "VaultSync model: user_id, name, checksum, size_bytes, synced_at, r2_key",
+        "VaultSync validates: name format, size <= 5MB, unique per user+name",
+        "R2Service.upload(key, data) and R2Service.download(key) work in console"
+      ],
+      "constraints": [
+        "Direct aws-sdk-s3 calls (not ActiveStorage) — no attachment indirection needed",
+        "R2 key pattern: <user_id>/<vault_name>.vault"
+      ],
+      "verify": "Rails console: upload blob, create VaultSync record, download and compare checksums"
+    },
+    {
+      "id": "VS-005",
+      "title": "InventList API — vault push/pull/list endpoints",
+      "status": "pending",
+      "scope": "PUT/GET/GET-list/DELETE endpoints for vault blobs, proxied through Rails to R2",
+      "acceptance": [
+        "PUT /api/v1/vaults/:name — upsert VaultSync + upload blob to R2",
+        "GET /api/v1/vaults/:name — stream blob from R2 to client",
+        "GET /api/v1/vaults — list all user's vault syncs (name, checksum, size, synced_at)",
+        "DELETE /api/v1/vaults/:name — remove from R2 + delete VaultSync record",
+        "All require Bearer token auth, 404 on missing vault"
+      ],
+      "constraints": [
+        "Max blob size 5MB enforced at controller level",
+        "Checksum computed server-side and stored in VaultSync"
+      ],
+      "verify": "curl PUT binary blob then GET returns identical bytes, checksum matches"
+    },
+    {
+      "id": "VS-006",
+      "title": "localvault sync push command",
+      "status": "pending",
+      "scope": "CLI command to upload encrypted vault blob to InventList/R2",
+      "acceptance": [
+        "localvault sync push pushes default vault",
+        "localvault sync push -v NAME pushes named vault",
+        "Warns if remote checksum is newer: 'Remote is newer. Use --force to overwrite.'",
+        "Shows: 'Pushing vault NAME... done (X KB)'"
+      ],
+      "constraints": [
+        "Vault file already encrypted — push as-is, no re-encryption",
+        "Requires active session OR passphrase to read vault file path"
+      ],
+      "verify": "Push from Mac 1, verify file appears in R2 bucket"
+    },
+    {
+      "id": "VS-007",
+      "title": "localvault sync pull command",
+      "status": "pending",
+      "scope": "CLI command to download encrypted vault blob from InventList/R2",
+      "acceptance": [
+        "localvault sync pull downloads and writes ~/.localvault/vaults/NAME.vault",
+        "Warns if local is newer: 'Local is newer. Use --force to overwrite.'",
+        "Creates vault directory if it doesn't exist",
+        "Shows: 'Pulled vault NAME. Run: localvault show to unlock.'"
+      ],
+      "constraints": [
+        "Does NOT prompt for passphrase — user unlocks separately after pull",
+        "Does NOT overwrite newer local vault without --force"
+      ],
+      "verify": "Pull on Mac 2, then localvault show with correct passphrase works"
+    },
+    {
+      "id": "VS-008",
+      "title": "localvault sync status command",
+      "status": "pending",
+      "scope": "Show sync state for all vaults: synced/ahead/behind/local-only/remote-only",
+      "acceptance": [
+        "localvault sync status shows table of all vaults with status and last synced time",
+        "Compares local vault file sha256 against remote checksum from API",
+        "Status values: synced, ahead, behind, local-only, remote-only"
+      ],
+      "constraints": ["Read-only — no push or pull side effects"],
+      "verify": "Push from Mac 1, check status on Mac 2 shows 'behind'"
+    },
+    {
+      "id": "VS-009",
+      "title": "localvault team add command",
+      "status": "pending",
+      "scope": "Add teammate's key slot to shared vault by looking up their public key from InventList profile",
+      "acceptance": [
+        "localvault team add @handle -v NAME adds key slot for handle",
+        "Fetches @handle public key from InventList, fails cleanly if not found",
+        "Re-encrypts vault with updated key slots, pushes to R2",
+        "Shows: 'Added @handle to vault NAME'"
+      ],
+      "constraints": [
+        "Requires vault to be unlocked (needs master key)",
+        "Only existing authorized users can add others"
+      ],
+      "verify": "Add teammate, they run sync pull and can unlock vault"
+    },
+    {
+      "id": "VS-010",
+      "title": "InventList API — public key lookup by handle",
+      "status": "done",
+      "scope": "GET /api/v1/users/:handle/public_key — already exists",
+      "acceptance": ["Pre-existing endpoint, no changes needed"],
+      "constraints": [],
+      "verify": "Already live at inventlist.com"
+    },
+    {
+      "id": "VS-011",
+      "title": "localvault team remove command",
+      "status": "pending",
+      "scope": "Remove teammate key slot, optionally rotate master key for full revocation",
+      "acceptance": [
+        "localvault team remove @handle -v NAME removes their key slot",
+        "localvault team list -v NAME shows all authorized users",
+        "--rotate flag re-encrypts vault with new master key",
+        "Cannot remove self if only authorized user"
+      ],
+      "constraints": ["--rotate requires passphrase re-confirmation"],
+      "verify": "After remove, sync pull fails for removed user"
+    }
+  ]
+}
