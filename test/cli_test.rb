@@ -102,6 +102,47 @@ class CLITest < Minitest::Test
     end
   end
 
+  def test_get_partial_match_single_result
+    vault = create_test_vault("default")
+    vault.set("CLOUDFLARE_API_TOKEN", "cf-abc123")
+    vault.set("OPENAI_API_KEY", "sk-xyz")
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[get CLOUDFLARE]) }
+      assert_equal "cf-abc123\n", out
+    end
+  end
+
+  def test_get_partial_match_case_insensitive
+    vault = create_test_vault("default")
+    vault.set("OPENAI_API_KEY", "sk-xyz")
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[get openai]) }
+      assert_equal "sk-xyz\n", out
+    end
+  end
+
+  def test_get_partial_match_multiple_results
+    vault = create_test_vault("default")
+    vault.set("STRIPE_KEY", "sk_live_1")
+    vault.set("STRIPE_SECRET", "sk_live_2")
+    with_session("default") do
+      _, err = capture_io { LocalVault::CLI.start(%w[get STRIPE]) }
+      assert_match(/Multiple keys match 'STRIPE'/, err)
+      assert_match(/STRIPE_KEY/, err)
+      assert_match(/STRIPE_SECRET/, err)
+    end
+  end
+
+  def test_get_exact_match_takes_priority_over_partial
+    vault = create_test_vault("default")
+    vault.set("API", "exact-value")
+    vault.set("API_KEY", "partial-value")
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[get API]) }
+      assert_equal "exact-value\n", out
+    end
+  end
+
   # --- list ---
 
   def test_list_outputs_sorted_keys

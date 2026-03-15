@@ -72,10 +72,26 @@ module LocalVault
     def get(key)
       vault = open_vault!
       value = vault.get(key)
+
       if value.nil?
-        abort_with "Key '#{key}' not found in vault '#{vault.name}'"
-        return
+        # Fall back to case-insensitive substring match
+        all_keys = vault.list
+        matches  = all_keys.select { |k| k.downcase.include?(key.downcase) }
+
+        if matches.size == 1
+          value = vault.get(matches.first)
+          $stdout.puts value
+          return
+        elsif matches.size > 1
+          $stderr.puts "Error: Multiple keys match '#{key}'. Be more specific:"
+          matches.sort.each { |k| $stderr.puts "  #{k}" }
+          return
+        else
+          abort_with "Key '#{key}' not found in vault '#{vault.name}'"
+          return
+        end
       end
+
       $stdout.puts value
     end
 
