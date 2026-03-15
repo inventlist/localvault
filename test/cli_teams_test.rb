@@ -155,6 +155,100 @@ class CLITeamsTest < Minitest::Test
     end
   end
 
+  # ── team remove ────────────────────────────────────────────────
+
+  def test_team_remove_requires_token
+    cli = LocalVault::CLI::Team.new([], {}, {})
+    err = capture_io { cli.remove("@bob") }.last
+    assert_includes err, "Not connected"
+  end
+
+  def test_team_remove_strips_at_sign
+    LocalVault::Config.token = "tok"
+    @fake_client.set_response({ "shares" => [
+      { "id" => 3, "recipient_handle" => "bob", "status" => "accepted", "created_at" => "2026-01-01T00:00:00Z" }
+    ] })
+
+    LocalVault::ApiClient.stub(:new, @fake_client) do
+      cli = LocalVault::CLI::Team.new([], {}, {})
+      out = capture_io { cli.remove("@bob") }.first
+      assert_includes out, "Removed @bob"
+      assert_equal :revoke_share, @fake_client.calls.last[:method]
+      assert_equal [3], @fake_client.calls.last[:args]
+    end
+  end
+
+  def test_team_remove_without_at_sign
+    LocalVault::Config.token = "tok"
+    @fake_client.set_response({ "shares" => [
+      { "id" => 5, "recipient_handle" => "alice", "status" => "pending", "created_at" => "2026-01-01T00:00:00Z" }
+    ] })
+
+    LocalVault::ApiClient.stub(:new, @fake_client) do
+      cli = LocalVault::CLI::Team.new([], {}, {})
+      out = capture_io { cli.remove("alice") }.first
+      assert_includes out, "Removed @alice"
+    end
+  end
+
+  def test_team_remove_no_share_found
+    LocalVault::Config.token = "tok"
+    @fake_client.set_response({ "shares" => [] })
+
+    LocalVault::ApiClient.stub(:new, @fake_client) do
+      cli = LocalVault::CLI::Team.new([], {}, {})
+      err = capture_io { cli.remove("@nobody") }.last
+      assert_includes err, "No active share found for @nobody"
+    end
+  end
+
+  def test_team_remove_skips_already_revoked
+    LocalVault::Config.token = "tok"
+    @fake_client.set_response({ "shares" => [
+      { "id" => 9, "recipient_handle" => "bob", "status" => "revoked", "created_at" => "2026-01-01T00:00:00Z" }
+    ] })
+
+    LocalVault::ApiClient.stub(:new, @fake_client) do
+      cli = LocalVault::CLI::Team.new([], {}, {})
+      err = capture_io { cli.remove("@bob") }.last
+      assert_includes err, "No active share found for @bob"
+    end
+  end
+
+  def test_team_remove_api_error
+    LocalVault::Config.token = "tok"
+    shares_response = { "shares" => [
+      { "id" => 7, "recipient_handle" => "bob", "status" => "accepted", "created_at" => "2026-01-01T00:00:00Z" }
+    ] }
+
+    two_call_client = Object.new
+    two_call_client.define_singleton_method(:sent_shares) { |**_| shares_response }
+    two_call_client.define_singleton_method(:revoke_share) do |_id|
+      raise LocalVault::ApiClient::ApiError.new("Server error", status: 500)
+    end
+
+    LocalVault::ApiClient.stub(:new, two_call_client) do
+      cli = LocalVault::CLI::Team.new([], {}, {})
+      err = capture_io { cli.remove("@bob") }.last
+      assert_includes err, "Error:"
+    end
+  end
+
+  def test_team_remove_with_vault_option
+    LocalVault::Config.token = "tok"
+    @fake_client.set_response({ "shares" => [
+      { "id" => 11, "recipient_handle" => "carol", "status" => "accepted", "created_at" => "2026-01-01T00:00:00Z" }
+    ] })
+
+    LocalVault::ApiClient.stub(:new, @fake_client) do
+      cli = LocalVault::CLI::Team.new([], { vault: "myvault" }, {})
+      out = capture_io { cli.remove("@carol") }.first
+      assert_includes out, "Removed @carol"
+      sent_call = @fake_client.calls.find { |c| c[:method] == :sent_shares }
+      assert_equal "myvault", sent_call[:kwargs][:vault_name]
+    end
+  end
+
   # ── share (no network) ─────────────────────────────────────────
 
   def test_share_requires_token

@@ -51,14 +51,16 @@ type: doc
 | `localvault sync pull [NAME] --force` | Overwrite existing local vault |
 | `localvault sync status` | Show local/remote status for all vaults |
 
-## Sharing (legacy)
+## Team access
 
 | Command | Description |
 |---------|-------------|
+| `localvault team list [VAULT]` | Show who has access to a vault |
+| `localvault team remove @HANDLE` | Remove a person's access to a vault |
 | `localvault share VAULT --with @handle` | Share vault with an InventList user |
 | `localvault share VAULT --with team:HANDLE` | Share with a team |
 | `localvault receive` | Import vaults shared with you |
-| `localvault revoke SHARE_ID` | Revoke a share |
+| `localvault revoke SHARE_ID` | Revoke a share by ID |
 
 ## MCP (AI tool integration)
 
