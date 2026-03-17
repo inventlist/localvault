@@ -222,6 +222,10 @@ bundle install
 bundle exec rake test
 ```
 
+## Used by
+
+Powers credentials management at [InventList](https://inventlist.com) — where indie builders ship, share, and get discovered.
+
 ## License
 
 MIT
