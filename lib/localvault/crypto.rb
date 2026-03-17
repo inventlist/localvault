@@ -1,4 +1,25 @@
-require "rbnacl"
+begin
+  require "rbnacl"
+rescue LoadError => e
+  if e.message.include?("libsodium") || e.message.include?("sodium")
+    $stderr.puts <<~MSG
+
+      ERROR: libsodium is not installed.
+
+      LocalVault requires libsodium for encryption. Install it for your platform:
+
+        macOS:         brew install libsodium
+        Ubuntu/Debian: sudo apt-get install libsodium-dev
+        Fedora/RHEL:   sudo dnf install libsodium-devel
+        Arch Linux:    sudo pacman -S libsodium
+        Alpine:        apk add libsodium-dev
+
+      Then retry: gem install localvault
+
+    MSG
+  end
+  raise
+end
 
 module LocalVault
   module Crypto
