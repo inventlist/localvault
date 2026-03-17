@@ -3,6 +3,11 @@ require "shellwords"
 
 module LocalVault
   class Vault
+    class InvalidKeyName < StandardError; end
+
+    # Shell-safe: letters, digits, underscores. Must start with letter or underscore.
+    KEY_SEGMENT_PATTERN = /\A[A-Za-z_][A-Za-z0-9_]*\z/
+
     attr_reader :name, :master_key, :store
 
     def initialize(name:, master_key:)
@@ -17,11 +22,13 @@ module LocalVault
         value = all[group]
         value.is_a?(Hash) ? value[subkey] : nil
       else
-        all[key]
+        value = all[key]
+        value.is_a?(Hash) ? nil : value
       end
     end
 
     def set(key, value)
+      validate_key!(key)
       secrets = all
       if key.include?(".")
         group, subkey = key.split(".", 2)
@@ -69,18 +76,20 @@ module LocalVault
     # Export as shell variable assignments.
     # - With project: exports only that group's keys (no prefix).
     # - Without project: flat keys as-is, nested keys as GROUP__KEY.
+    # Keys that aren't valid shell identifiers are silently skipped.
     def export_env(project: nil)
       secrets = all
       if project
         group = secrets[project]
         return "" unless group.is_a?(Hash)
-        group.map { |k, v| "export #{k}=#{Shellwords.escape(v.to_s)}" }.join("\n")
+        group.filter_map { |k, v| "export #{k}=#{Shellwords.escape(v.to_s)}" if shell_safe_key?(k) }.join("\n")
       else
         secrets.flat_map do |k, v|
           if v.is_a?(Hash)
-            v.map { |sk, sv| "export #{k.upcase}__#{sk}=#{Shellwords.escape(sv.to_s)}" }
+            next [] unless shell_safe_key?(k)
+            v.filter_map { |sk, sv| "export #{k.upcase}__#{sk}=#{Shellwords.escape(sv.to_s)}" if shell_safe_key?(sk) }
           else
-            ["export #{k}=#{Shellwords.escape(v.to_s)}"]
+            shell_safe_key?(k) ? ["export #{k}=#{Shellwords.escape(v.to_s)}"] : []
           end
         end.join("\n")
       end
@@ -89,20 +98,22 @@ module LocalVault
     # Returns a flat hash suitable for env injection.
     # - With project: only that group's key-value pairs.
     # - Without project: flat keys + nested keys as GROUP__KEY.
+    # Keys that aren't valid shell identifiers are silently skipped.
     def env_hash(project: nil)
       secrets = all
       if project
         group = secrets[project]
         return {} unless group.is_a?(Hash)
-        group.transform_values(&:to_s)
+        group.each_with_object({}) { |(k, v), h| h[k] = v.to_s if shell_safe_key?(k) }
       else
-        secrets.flat_map do |k, v|
+        secrets.each_with_object({}) do |(k, v), h|
           if v.is_a?(Hash)
-            v.map { |sk, sv| ["#{k.upcase}__#{sk}", sv.to_s] }
+            next unless shell_safe_key?(k)
+            v.each { |sk, sv| h["#{k.upcase}__#{sk}"] = sv.to_s if shell_safe_key?(sk) }
           else
-            [[k, v.to_s]]
+            h[k] = v.to_s if shell_safe_key?(k)
           end
-        end.to_h
+        end
       end
     end
 
@@ -138,7 +149,56 @@ module LocalVault
       new(name: name, master_key: master_key)
     end
 
+    # Bulk-set: merges all key-value pairs in a single decrypt/encrypt cycle.
+    # Supports nested hashes: { "app" => { "DB" => "..." } } merges into group "app".
+    def merge(hash)
+      secrets = all
+      hash.each do |k, v|
+        if v.is_a?(Hash)
+          validate_key_segment!(k)
+          secrets[k] ||= {}
+          raise "#{k} is a scalar value, not a group" unless secrets[k].is_a?(Hash)
+          v.each do |sk, sv|
+            validate_key_segment!(sk)
+            secrets[k][sk] = sv.to_s
+          end
+        else
+          validate_key!(k)
+          if k.include?(".")
+            group, subkey = k.split(".", 2)
+            secrets[group] ||= {}
+            raise "#{group} is a scalar value, not a group" unless secrets[group].is_a?(Hash)
+            secrets[group][subkey] = v.to_s
+          else
+            secrets[k] = v.to_s
+          end
+        end
+      end
+      write_secrets(secrets)
+    end
+
     private
+
+    def shell_safe_key?(key)
+      key.is_a?(String) && key.match?(KEY_SEGMENT_PATTERN)
+    end
+
+    def validate_key!(key)
+      raise InvalidKeyName, "Key name cannot be empty" if key.nil? || key.empty?
+      if key.include?(".")
+        group, subkey = key.split(".", 2)
+        validate_key_segment!(group)
+        validate_key_segment!(subkey)
+      else
+        validate_key_segment!(key)
+      end
+    end
+
+    def validate_key_segment!(segment)
+      raise InvalidKeyName, "Key segment cannot be empty" if segment.nil? || segment.empty?
+      raise InvalidKeyName, "Key '#{segment}' contains invalid characters (allowed: A-Z, a-z, 0-9, underscore)" unless segment.match?(KEY_SEGMENT_PATTERN)
+      raise InvalidKeyName, "Key '#{segment}' is too long (max 128)" if segment.length > 128
+    end
 
     def write_secrets(secrets)
       json = JSON.generate(secrets)

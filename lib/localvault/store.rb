@@ -5,9 +5,15 @@ require "base64"
 
 module LocalVault
   class Store
+    class InvalidVaultName < StandardError; end
+
+    # Letters, digits, underscore, dash. Must start with alphanumeric.
+    VAULT_NAME_PATTERN = /\A[a-zA-Z0-9][a-zA-Z0-9_\-]*\z/
+
     attr_reader :vault_name
 
     def initialize(vault_name)
+      validate_vault_name!(vault_name)
       @vault_name = vault_name
     end
 
@@ -30,15 +36,15 @@ module LocalVault
     def create!(salt:)
       raise "Vault '#{vault_name}' already exists" if exists?
 
-      FileUtils.mkdir_p(vault_path)
-      meta = {
+      FileUtils.mkdir_p(vault_path, mode: 0o700)
+      new_meta = {
         "name"       => vault_name,
         "created_at" => Time.now.utc.iso8601,
         "version"    => 1,
         "salt"       => Base64.strict_encode64(salt),
         "count"      => 0
       }
-      File.write(meta_path, YAML.dump(meta))
+      write_meta(new_meta)
     end
 
     def meta
@@ -60,7 +66,7 @@ module LocalVault
       m = meta
       return unless m
       m["count"] = n
-      File.write(meta_path, YAML.dump(m))
+      write_meta(m)
     end
 
     def read_encrypted
@@ -69,7 +75,7 @@ module LocalVault
     end
 
     def write_encrypted(bytes)
-      FileUtils.mkdir_p(vault_path)
+      FileUtils.mkdir_p(vault_path, mode: 0o700)
 
       # Atomic write: write to temp file, then rename
       tmp = Tempfile.new("localvault", vault_path)
@@ -77,6 +83,7 @@ module LocalVault
       tmp.write(bytes)
       tmp.close
       File.rename(tmp.path, secrets_path)
+      File.chmod(0o600, secrets_path)
     rescue StandardError
       tmp&.close
       tmp&.unlink
@@ -84,18 +91,35 @@ module LocalVault
     end
 
     def create_meta!(salt:)
-      meta = {
+      existing = meta
+      new_meta = {
         "name"       => vault_name,
-        "created_at" => meta&.dig("created_at") || Time.now.utc.iso8601,
+        "created_at" => existing&.dig("created_at") || Time.now.utc.iso8601,
         "version"    => 1,
         "salt"       => Base64.strict_encode64(salt)
       }
-      File.write(meta_path, YAML.dump(meta))
+      write_meta(new_meta)
     end
 
     def destroy!
       FileUtils.rm_rf(vault_path)
     end
+
+    private
+
+    def write_meta(data)
+      File.write(meta_path, YAML.dump(data))
+      File.chmod(0o600, meta_path)
+    end
+
+    def validate_vault_name!(name)
+      raise InvalidVaultName, "Vault name cannot be empty" if name.nil? || name.to_s.empty?
+      name = name.to_s
+      raise InvalidVaultName, "Vault name '#{name}' contains invalid characters (allowed: a-z, 0-9, dash, underscore)" unless name.match?(VAULT_NAME_PATTERN)
+      raise InvalidVaultName, "Vault name '#{name}' is too long (max 64)" if name.length > 64
+    end
+
+    public
 
     def self.list_vaults
       vaults_dir = Config.vaults_path

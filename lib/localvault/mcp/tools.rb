@@ -94,6 +94,8 @@ module LocalVault
       def self.set_secret(key, value, vault)
         vault.set(key, value)
         text_result("Stored #{key}")
+      rescue Vault::InvalidKeyName => e
+        error_result("Invalid key name: #{e.message}")
       end
 
       def self.delete_secret(key, vault)

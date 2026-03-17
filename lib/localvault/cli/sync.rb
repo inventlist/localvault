@@ -42,9 +42,14 @@ module LocalVault
         blob   = client.pull_vault(vault_name)
         data   = SyncBundle.unpack(blob)
 
-        FileUtils.mkdir_p(store.vault_path)
+        FileUtils.mkdir_p(store.vault_path, mode: 0o700)
         File.write(store.meta_path, data[:meta])
-        store.write_encrypted(data[:secrets]) unless data[:secrets].empty?
+        File.chmod(0o600, store.meta_path)
+        if data[:secrets].empty?
+          FileUtils.rm_f(store.secrets_path)
+        else
+          store.write_encrypted(data[:secrets])
+        end
 
         $stdout.puts "Pulled vault '#{vault_name}'."
         $stdout.puts "Unlock it with: localvault unlock -v #{vault_name}"

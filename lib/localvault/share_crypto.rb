@@ -43,6 +43,8 @@ module LocalVault
       raise DecryptionError, "Failed to decrypt share: #{e.message}"
     rescue JSON::ParserError, KeyError => e
       raise DecryptionError, "Invalid payload format: #{e.message}"
+    rescue ArgumentError => e
+      raise DecryptionError, "Invalid payload encoding: #{e.message}"
     end
   end
 end

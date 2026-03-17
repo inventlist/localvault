@@ -27,7 +27,7 @@ module LocalVault
 
     # GET /api/v1/users/:handle/public_key
     def get_public_key(handle)
-      get("/users/#{handle}/public_key")
+      get("/users/#{URI.encode_uri_component(handle)}/public_key")
     end
 
     # PUT /api/v1/profile/public_key
@@ -58,22 +58,22 @@ module LocalVault
 
     # PATCH /api/v1/vault_shares/:id/accept
     def accept_share(id)
-      patch("/vault_shares/#{id}/accept", {})
+      patch("/vault_shares/#{URI.encode_uri_component(id.to_s)}/accept", {})
     end
 
     # DELETE /api/v1/vault_shares/:id
     def revoke_share(id)
-      delete("/vault_shares/#{id}")
+      delete("/vault_shares/#{URI.encode_uri_component(id.to_s)}")
     end
 
     # GET /api/v1/teams/:handle/members/public_keys
     def team_public_keys(team_handle)
-      get("/teams/#{team_handle}/members/public_keys")
+      get("/teams/#{URI.encode_uri_component(team_handle)}/members/public_keys")
     end
 
     # GET /api/v1/sites/:slug/crew/public_keys
     def crew_public_keys(site_slug)
-      get("/sites/#{site_slug}/crew/public_keys")
+      get("/sites/#{URI.encode_uri_component(site_slug)}/crew/public_keys")
     end
 
     # GET /api/v1/vaults
@@ -122,6 +122,8 @@ module LocalVault
       uri  = URI("#{@base_url}#{BASE_PATH}#{path}")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = uri.scheme == "https"
+      http.open_timeout = 10
+      http.read_timeout = 30
 
       req_class = {
         get:    Net::HTTP::Get,
@@ -152,6 +154,8 @@ module LocalVault
       uri  = URI("#{@base_url}#{BASE_PATH}#{path}")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = uri.scheme == "https"
+      http.open_timeout = 10
+      http.read_timeout = 30
 
       req_class = { put: Net::HTTP::Put }.fetch(method)
       req = req_class.new(uri.request_uri)
@@ -175,6 +179,8 @@ module LocalVault
       uri  = URI("#{@base_url}#{BASE_PATH}#{path}")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = uri.scheme == "https"
+      http.open_timeout = 10
+      http.read_timeout = 30
 
       req_class = { get: Net::HTTP::Get }.fetch(method)
       req = req_class.new(uri.request_uri)

@@ -19,6 +19,7 @@ module LocalVault
       File.write(priv_key_path, Base64.strict_encode64(kp[:private_key]))
       File.chmod(0o600, priv_key_path)
       File.write(pub_key_path, Base64.strict_encode64(kp[:public_key]))
+      File.chmod(0o644, pub_key_path)
       kp
     end
 

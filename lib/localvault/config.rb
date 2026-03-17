@@ -29,6 +29,7 @@ module LocalVault
     def self.save(data)
       FileUtils.mkdir_p(root_path)
       File.write(config_path, YAML.dump(data))
+      File.chmod(0o600, config_path)
     end
 
     def self.default_vault
@@ -42,9 +43,9 @@ module LocalVault
     end
 
     def self.ensure_directories!
-      FileUtils.mkdir_p(root_path)
-      FileUtils.mkdir_p(vaults_path)
-      FileUtils.mkdir_p(keys_path)
+      FileUtils.mkdir_p(root_path, mode: 0o700)
+      FileUtils.mkdir_p(vaults_path, mode: 0o700)
+      FileUtils.mkdir_p(keys_path, mode: 0o700)
     end
 
     def self.token

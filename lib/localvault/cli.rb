@@ -422,7 +422,7 @@ module LocalVault
         salt       = Crypto.generate_salt
         master_key = Crypto.derive_master_key("demo", salt)
         vault      = Vault.create!(name: vault_name, master_key: master_key, salt: salt)
-        secrets.each { |k, v| vault.set(k, v) }
+        vault.merge(secrets)
         $stdout.puts "  created vault '#{vault_name}' (#{secrets.size} secrets)"
       end
 
@@ -611,7 +611,7 @@ module LocalVault
 
       imported = 0
       shares.each do |share|
-        vault_name = "#{share["vault_name"]}-from-#{share["sender_handle"]}"
+        vault_name = sanitize_receive_vault_name(share["vault_name"], share["sender_handle"])
         $stdout.puts "  [#{share["id"]}] vault '#{share["vault_name"]}' from @#{share["sender_handle"]}"
 
         begin
@@ -635,10 +635,15 @@ module LocalVault
         salt       = Crypto.generate_salt
         master_key = Crypto.derive_master_key(passphrase, salt)
         vault      = Vault.create!(name: vault_name, master_key: master_key, salt: salt)
-        secrets.each { |k, v| vault.set(k, v.to_s) }
+        vault.merge(secrets)
 
-        $stdout.puts "    Imported #{secrets.size} secret(s) → vault '#{vault_name}'"
-        client.accept_share(share["id"]) rescue nil
+        count = secrets.sum { |_, v| v.is_a?(Hash) ? v.size : 1 }
+        $stdout.puts "    Imported #{count} secret(s) → vault '#{vault_name}'"
+        begin
+          client.accept_share(share["id"])
+        rescue ApiClient::ApiError => e
+          $stderr.puts "    Warning: could not mark share as accepted: #{e.message}"
+        end
         imported += 1
       end
 
@@ -700,20 +705,22 @@ module LocalVault
 
       vault   = open_vault!
       project = options[:project]
-      count   = 0
 
+      # Restructure data for bulk merge
+      to_merge = {}
       data.each do |key, value|
         if value.is_a?(Hash)
-          value.each do |subkey, subval|
-            vault.set("#{key}.#{subkey}", subval.to_s)
-            count += 1
-          end
+          to_merge[key] = value
+        elsif project
+          to_merge[project] ||= {}
+          to_merge[project][key] = value.to_s
         else
-          dest_key = project ? "#{project}.#{key}" : key
-          vault.set(dest_key, value.to_s)
-          count += 1
+          to_merge[key] = value.to_s
         end
       end
+
+      vault.merge(to_merge)
+      count = to_merge.sum { |_, v| v.is_a?(Hash) ? v.size : 1 }
 
       $stdout.puts "Imported #{count} secret(s) into vault '#{vault.name}'" \
                    "#{project ? " / #{project}" : ""}."
@@ -995,7 +1002,8 @@ module LocalVault
         end
       end
 
-      passphrase = prompt_passphrase("Passphrase for '#{vault_name}': ")
+      prompt_msg = vault_name == resolve_vault_name ? "Passphrase: " : "Passphrase for '#{vault_name}': "
+      passphrase = prompt_passphrase(prompt_msg)
       vault = Vault.open(name: vault_name, passphrase: passphrase)
       vault.all
       SessionCache.set(vault_name, vault.master_key)
@@ -1006,58 +1014,27 @@ module LocalVault
     end
 
     def resolve_recipients(client, target)
-      if target.start_with?("team:")
-        handle = target.delete_prefix("team:")
-        result = client.team_public_keys(handle)
-        (result["members"] || []).map { |m| [m["handle"], m["public_key"]] }
-      elsif target.start_with?("crew:")
-        slug   = target.delete_prefix("crew:")
-        result = client.crew_public_keys(slug)
-        (result["members"] || []).map { |m| [m["handle"], m["public_key"]] }
-      else
-        handle = target.delete_prefix("@")
-        result = client.get_public_key(handle)
-        [[result["handle"], result["public_key"]]]
-      end
+      raw = if target.start_with?("team:")
+              handle = target.delete_prefix("team:")
+              result = client.team_public_keys(handle)
+              (result["members"] || []).map { |m| [m["handle"], m["public_key"]] }
+            elsif target.start_with?("crew:")
+              slug = target.delete_prefix("crew:")
+              result = client.crew_public_keys(slug)
+              (result["members"] || []).map { |m| [m["handle"], m["public_key"]] }
+            else
+              handle = target.delete_prefix("@")
+              result = client.get_public_key(handle)
+              [[result["handle"], result["public_key"]]]
+            end
+      raw.select { |h, pk| h && pk && !h.empty? && !pk.empty? }
     rescue ApiClient::ApiError => e
       $stderr.puts "Warning: #{e.message}"
       []
     end
 
     def open_vault!
-      vault_name = resolve_vault_name
-
-      # 1. Try LOCALVAULT_SESSION env var
-      if (vault = vault_from_session(vault_name))
-        return vault
-      end
-
-      store = Store.new(vault_name)
-      unless store.exists?
-        abort_with "Vault '#{vault_name}' does not exist. Run: localvault init #{vault_name}"
-        raise SystemExit.new(1)
-      end
-
-      # 2. Try Keychain session cache
-      if (master_key = SessionCache.get(vault_name))
-        begin
-          vault = Vault.new(name: vault_name, master_key: master_key)
-          vault.all  # verify key still valid
-          return vault
-        rescue Crypto::DecryptionError
-          SessionCache.clear(vault_name)  # stale cache — clear and fall through
-        end
-      end
-
-      # 3. Prompt passphrase and cache the result
-      passphrase = prompt_passphrase("Passphrase: ")
-      vault = Vault.open(name: vault_name, passphrase: passphrase)
-      vault.all  # eager verification
-      SessionCache.set(vault_name, vault.master_key)
-      vault
-    rescue Crypto::DecryptionError
-      abort_with "Wrong passphrase for vault '#{vault_name}'"
-      raise SystemExit.new(1)
+      open_vault_by_name!(resolve_vault_name)
     end
 
     def vault_from_session(vault_name)
@@ -1074,6 +1051,15 @@ module LocalVault
       vault
     rescue ArgumentError, Crypto::DecryptionError
       nil
+    end
+
+    def sanitize_receive_vault_name(vault_name, sender_handle)
+      safe_vault  = vault_name.to_s.gsub(/[^a-zA-Z0-9_\-]/, "-")
+      safe_handle = sender_handle.to_s.gsub(/[^a-zA-Z0-9_\-]/, "-")
+      # Ensure it starts with alphanumeric (Store validation requirement)
+      safe_vault  = "v-#{safe_vault}"  unless safe_vault.match?(/\A[a-zA-Z0-9]/)
+      safe_handle = "u-#{safe_handle}" unless safe_handle.match?(/\A[a-zA-Z0-9]/)
+      "#{safe_vault}-from-#{safe_handle}"[0, 64]
     end
 
     def abort_with(message)

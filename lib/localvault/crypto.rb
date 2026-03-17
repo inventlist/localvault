@@ -43,8 +43,6 @@ module LocalVault
     end
 
     def self.generate_keypair
-      private_key = RbNaCl::GroupElements::Curve25519.base.mult(RbNaCl::Random.random_bytes(32))
-      # Use X25519 for key exchange
       sk = RbNaCl::PrivateKey.generate
       {
         public_key: sk.public_key.to_bytes,

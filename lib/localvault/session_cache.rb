@@ -64,24 +64,29 @@ module LocalVault
     def self.keychain_get(vault_name)
       if macos?
         out = `security find-generic-password -a #{Shellwords.escape(vault_name)} -s #{Shellwords.escape(KEYCHAIN_SERVICE)} -w 2>/dev/null`.chomp
-        $?.success? && !out.empty? ? out : nil
-      else
-        file = session_file(vault_name)
-        File.exist?(file) ? File.read(file).strip : nil
+        return out if $?.success? && !out.empty?
       end
+      # File fallback (Linux, or macOS when Keychain unavailable)
+      file = session_file(vault_name)
+      File.exist?(file) ? File.read(file).strip : nil
     end
 
     def self.keychain_set(vault_name, payload)
       if macos?
         keychain_delete(vault_name)
-        system(
+        success = system(
           "security", "add-generic-password",
           "-a", vault_name,
           "-s", KEYCHAIN_SERVICE,
           "-w", payload,
-          "-A",
           out: File::NULL, err: File::NULL
         )
+        # Fall back to file store if Keychain fails (e.g., in CI or sandboxed env)
+        unless success
+          file = session_file(vault_name)
+          File.write(file, payload)
+          File.chmod(0o600, file)
+        end
       else
         keychain_delete(vault_name)
         file = session_file(vault_name)
@@ -98,9 +103,9 @@ module LocalVault
           "-s", KEYCHAIN_SERVICE,
           out: File::NULL, err: File::NULL
         )
-      else
-        FileUtils.rm_f(session_file(vault_name))
       end
+      # Always clean file fallback
+      FileUtils.rm_f(session_file(vault_name))
     end
 
   end
