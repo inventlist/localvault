@@ -7,9 +7,15 @@ Gem::Specification.new do |spec|
   spec.email         = ["nauman@intellecta.co"]
 
   spec.summary       = "Zero-infrastructure secrets manager"
-  spec.description   = "Encrypted local vault for secrets with MCP server for AI agents. No cloud required."
+  spec.description   = "Encrypted local vault for secrets with MCP server for AI agents. No cloud required. Powers credentials management at inventlist.com."
   spec.homepage      = "https://github.com/inventlist/localvault"
   spec.license       = "MIT"
+
+  spec.metadata = {
+    "homepage_uri" => "https://github.com/inventlist/localvault",
+    "source_code_uri" => "https://github.com/inventlist/localvault",
+    "funding_uri" => "https://inventlist.com"
+  }
 
   spec.required_ruby_version = ">= 3.2.0"
 
