@@ -35,9 +35,23 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           URL="https://github.com/inventlist/localvault/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
 
-          # Wait a moment for GitHub to make the tarball available
-          sleep 5
-          SHA256=$(curl -sL "$URL" | shasum -a 256 | cut -d' ' -f1)
+          # Retry up to 5 times — GitHub may not have the tarball ready immediately
+          for i in 1 2 3 4 5; do
+            HTTP_CODE=$(curl -sL --fail -o /tmp/tarball.tar.gz -w "%{http_code}" "$URL")
+            if [ "$HTTP_CODE" = "200" ] && [ -s /tmp/tarball.tar.gz ]; then
+              break
+            fi
+            echo "Attempt $i: tarball not ready (HTTP $HTTP_CODE), retrying in $((i * 5))s..."
+            sleep $((i * 5))
+          done
+
+          if [ ! -s /tmp/tarball.tar.gz ]; then
+            echo "ERROR: Failed to download tarball after 5 attempts"
+            exit 1
+          fi
+
+          SHA256=$(shasum -a 256 /tmp/tarball.tar.gz | cut -d' ' -f1)
+          echo "SHA256: $SHA256"
 
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/inventlist/homebrew-tap.git" tap
           cd tap

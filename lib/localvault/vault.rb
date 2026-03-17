@@ -76,20 +76,43 @@ module LocalVault
     # Export as shell variable assignments.
     # - With project: exports only that group's keys (no prefix).
     # - Without project: flat keys as-is, nested keys as GROUP__KEY.
-    # Keys that aren't valid shell identifiers are silently skipped.
-    def export_env(project: nil)
+    # Keys that aren't valid shell identifiers are skipped. Pass on_skip: callable
+    # to be notified (e.g., for warnings).
+    def export_env(project: nil, on_skip: nil)
       secrets = all
       if project
         group = secrets[project]
         return "" unless group.is_a?(Hash)
-        group.filter_map { |k, v| "export #{k}=#{Shellwords.escape(v.to_s)}" if shell_safe_key?(k) }.join("\n")
+        group.filter_map do |k, v|
+          if shell_safe_key?(k)
+            "export #{k}=#{Shellwords.escape(v.to_s)}"
+          else
+            on_skip&.call(k)
+            nil
+          end
+        end.join("\n")
       else
         secrets.flat_map do |k, v|
           if v.is_a?(Hash)
-            next [] unless shell_safe_key?(k)
-            v.filter_map { |sk, sv| "export #{k.upcase}__#{sk}=#{Shellwords.escape(sv.to_s)}" if shell_safe_key?(sk) }
+            unless shell_safe_key?(k)
+              on_skip&.call(k)
+              next []
+            end
+            v.filter_map do |sk, sv|
+              if shell_safe_key?(sk)
+                "export #{k.upcase}__#{sk}=#{Shellwords.escape(sv.to_s)}"
+              else
+                on_skip&.call("#{k}.#{sk}")
+                nil
+              end
+            end
           else
-            shell_safe_key?(k) ? ["export #{k}=#{Shellwords.escape(v.to_s)}"] : []
+            if shell_safe_key?(k)
+              ["export #{k}=#{Shellwords.escape(v.to_s)}"]
+            else
+              on_skip&.call(k)
+              []
+            end
           end
         end.join("\n")
       end
@@ -98,20 +121,40 @@ module LocalVault
     # Returns a flat hash suitable for env injection.
     # - With project: only that group's key-value pairs.
     # - Without project: flat keys + nested keys as GROUP__KEY.
-    # Keys that aren't valid shell identifiers are silently skipped.
-    def env_hash(project: nil)
+    # Keys that aren't valid shell identifiers are skipped. Pass on_skip: callable
+    # to be notified.
+    def env_hash(project: nil, on_skip: nil)
       secrets = all
       if project
         group = secrets[project]
         return {} unless group.is_a?(Hash)
-        group.each_with_object({}) { |(k, v), h| h[k] = v.to_s if shell_safe_key?(k) }
+        group.each_with_object({}) do |(k, v), h|
+          if shell_safe_key?(k)
+            h[k] = v.to_s
+          else
+            on_skip&.call(k)
+          end
+        end
       else
         secrets.each_with_object({}) do |(k, v), h|
           if v.is_a?(Hash)
-            next unless shell_safe_key?(k)
-            v.each { |sk, sv| h["#{k.upcase}__#{sk}"] = sv.to_s if shell_safe_key?(sk) }
+            unless shell_safe_key?(k)
+              on_skip&.call(k)
+              next
+            end
+            v.each do |sk, sv|
+              if shell_safe_key?(sk)
+                h["#{k.upcase}__#{sk}"] = sv.to_s
+              else
+                on_skip&.call("#{k}.#{sk}")
+              end
+            end
           else
-            h[k] = v.to_s if shell_safe_key?(k)
+            if shell_safe_key?(k)
+              h[k] = v.to_s
+            else
+              on_skip&.call(k)
+            end
           end
         end
       end

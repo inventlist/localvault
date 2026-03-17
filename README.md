@@ -176,7 +176,7 @@ If you've already run `eval $(localvault unlock)` in your terminal, the agent in
 
 **Available tools:** `get_secret`, `list_secrets`, `set_secret`, `delete_secret`
 
-See [MCP Setup Guide](docs/site-docs/mcp-setup.md) for Claude Code and Cursor configuration details.
+See [MCP for AI Agents](https://inventlist.com/sites/localvault/series/localvault/mcp-for-ai-agents) for Claude Code and Cursor configuration details.
 
 ## Security
 

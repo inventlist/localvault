@@ -21,7 +21,10 @@ module LocalVault
       return nil unless key_b64 && expiry_str
 
       expiry = expiry_str.to_i
-      return nil if Time.now.to_i >= expiry
+      if Time.now.to_i >= expiry
+        clear(vault_name)  # clean up expired entry
+        return nil
+      end
 
       Base64.strict_decode64(key_b64)
     rescue ArgumentError

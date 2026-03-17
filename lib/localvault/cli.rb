@@ -161,7 +161,8 @@ module LocalVault
     method_option :project, aliases: "-p", type: :string, desc: "Export only this project group (no prefix)"
     def env
       vault = open_vault!
-      $stdout.puts vault.export_env(project: options[:project])
+      skip_warn = ->(k) { $stderr.puts "Warning: skipping unsafe key '#{k}'" }
+      $stdout.puts vault.export_env(project: options[:project], on_skip: skip_warn)
     end
 
     desc "exec -- CMD", "Run a command with secrets injected as environment variables"
@@ -184,7 +185,8 @@ module LocalVault
     method_option :project, aliases: "-p", type: :string, desc: "Inject only this project group (no prefix)"
     def exec(*cmd)
       vault = open_vault!
-      env_vars = vault.env_hash(project: options[:project])
+      skip_warn = ->(k) { $stderr.puts "Warning: skipping unsafe key '#{k}'" }
+      env_vars = vault.env_hash(project: options[:project], on_skip: skip_warn)
       Kernel.exec(env_vars, *cmd)
     end
 

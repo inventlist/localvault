@@ -1,5 +1,6 @@
 require "json"
 require "base64"
+require "yaml"
 
 module LocalVault
   module SyncBundle
@@ -20,14 +21,24 @@ module LocalVault
     end
 
     # Unpack a blob back into {meta:, secrets:} strings.
-    def self.unpack(blob)
+    # Pass expected_name: to validate the meta.yml name matches the vault being pulled.
+    def self.unpack(blob, expected_name: nil)
       data = JSON.parse(blob)
       version = data["version"]
       raise UnpackError, "Unsupported bundle version: #{version}" if version && version != VERSION
-      {
-        meta:    Base64.strict_decode64(data.fetch("meta")),
-        secrets: Base64.strict_decode64(data.fetch("secrets"))
-      }
+
+      meta_raw    = Base64.strict_decode64(data.fetch("meta"))
+      secrets_raw = Base64.strict_decode64(data.fetch("secrets"))
+
+      if expected_name
+        meta_parsed = YAML.safe_load(meta_raw)
+        actual_name = meta_parsed&.dig("name")
+        if actual_name && actual_name != expected_name
+          raise UnpackError, "Bundle meta name '#{actual_name}' does not match expected vault '#{expected_name}'"
+        end
+      end
+
+      { meta: meta_raw, secrets: secrets_raw }
     rescue JSON::ParserError => e
       raise UnpackError, "Invalid sync bundle format: #{e.message}"
     rescue KeyError => e

@@ -122,8 +122,9 @@ module LocalVault
       uri  = URI("#{@base_url}#{BASE_PATH}#{path}")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = uri.scheme == "https"
-      http.open_timeout = 10
-      http.read_timeout = 30
+      http.open_timeout  = 10
+      http.read_timeout  = 30
+      http.write_timeout = 30
 
       req_class = {
         get:    Net::HTTP::Get,
@@ -154,8 +155,9 @@ module LocalVault
       uri  = URI("#{@base_url}#{BASE_PATH}#{path}")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = uri.scheme == "https"
-      http.open_timeout = 10
-      http.read_timeout = 30
+      http.open_timeout  = 10
+      http.read_timeout  = 30
+      http.write_timeout = 30
 
       req_class = { put: Net::HTTP::Put }.fetch(method)
       req = req_class.new(uri.request_uri)
@@ -179,8 +181,9 @@ module LocalVault
       uri  = URI("#{@base_url}#{BASE_PATH}#{path}")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = uri.scheme == "https"
-      http.open_timeout = 10
-      http.read_timeout = 30
+      http.open_timeout  = 10
+      http.read_timeout  = 30
+      http.write_timeout = 30
 
       req_class = { get: Net::HTTP::Get }.fetch(method)
       req = req_class.new(uri.request_uri)
