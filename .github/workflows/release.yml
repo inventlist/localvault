@@ -8,6 +8,8 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - uses: actions/checkout@v4
@@ -19,6 +21,10 @@ jobs:
 
       - name: Run tests
         run: bundle exec rake test
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Build gem
         run: gem build localvault.gemspec
@@ -64,3 +70,38 @@ jobs:
           git add Formula/localvault.rb
           git commit -m "localvault ${VERSION}"
           git push
+
+  smoke-test:
+    needs: release
+    runs-on: macos-latest
+
+    steps:
+      - name: Wait for tap to propagate
+        run: sleep 10
+
+      - name: Install from tap
+        run: |
+          brew tap inventlist/tap
+          brew install inventlist/tap/localvault
+
+      - name: Verify version
+        run: |
+          INSTALLED=$(localvault version)
+          EXPECTED="localvault ${{ needs.release.outputs.version }}"
+          echo "Installed: $INSTALLED"
+          echo "Expected:  $EXPECTED"
+          [ "$INSTALLED" = "$EXPECTED" ] || { echo "FAIL: version mismatch"; exit 1; }
+
+      - name: Smoke test
+        run: |
+          export LOCALVAULT_HOME=$(mktemp -d)
+          echo -e "testpass\ntestpass" | localvault init
+          echo "Smoke test passed: init works"
+          rm -rf "$LOCALVAULT_HOME"
+
+      - name: Verify RubyGems install
+        run: |
+          gem install localvault -v "${{ needs.release.outputs.version }}"
+          GEM_INSTALLED=$(gem list localvault --exact | head -1)
+          echo "RubyGems: $GEM_INSTALLED"
+          echo "$GEM_INSTALLED" | grep -q "${{ needs.release.outputs.version }}" || { echo "FAIL: gem version mismatch"; exit 1; }
