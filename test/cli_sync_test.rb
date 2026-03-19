@@ -1,6 +1,9 @@
 require_relative "test_helper"
 require "minitest/mock"
 require "localvault/cli"
+require "yaml"
+require "base64"
+require "json"
 
 class FakeSyncApiClient
   attr_reader :calls
@@ -42,6 +45,22 @@ class CLISyncTest < Minitest::Test
 
   def teardown
     teardown_test_home
+  end
+
+  # Build a sync bundle with the given vault name in meta (for pull tests)
+  def build_bundle_for(name)
+    meta = YAML.dump({
+      "name" => name,
+      "created_at" => Time.now.utc.iso8601,
+      "version" => 1,
+      "salt" => Base64.strict_encode64(LocalVault::Crypto.generate_salt),
+      "count" => 0
+    })
+    JSON.generate({
+      "version" => 1,
+      "meta" => Base64.strict_encode64(meta),
+      "secrets" => Base64.strict_encode64("")
+    })
   end
 
   def create_test_vault(name, passphrase)
@@ -144,8 +163,7 @@ class CLISyncTest < Minitest::Test
 
   def test_sync_pull_restores_vault_files
     LocalVault::Config.token = "tok"
-    store = LocalVault::Store.new("default")
-    blob  = LocalVault::SyncBundle.pack(store)
+    blob = build_bundle_for("restored")
     @fake_client.set_response(:pull_vault, blob)
     stub_api_client(@fake_client) do
       capture_io { LocalVault::CLI.start(%w[sync pull restored]) }
@@ -155,8 +173,7 @@ class CLISyncTest < Minitest::Test
 
   def test_sync_pull_prints_confirmation
     LocalVault::Config.token = "tok"
-    store = LocalVault::Store.new("default")
-    blob  = LocalVault::SyncBundle.pack(store)
+    blob = build_bundle_for("restored")
     @fake_client.set_response(:pull_vault, blob)
     out, = stub_api_client(@fake_client) do
       capture_io { LocalVault::CLI.start(%w[sync pull restored]) }

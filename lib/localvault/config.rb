@@ -27,7 +27,7 @@ module LocalVault
     end
 
     def self.save(data)
-      FileUtils.mkdir_p(root_path)
+      FileUtils.mkdir_p(root_path, mode: 0o700)
       File.write(config_path, YAML.dump(data))
       File.chmod(0o600, config_path)
     end

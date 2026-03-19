@@ -40,7 +40,7 @@ module LocalVault
 
         client = ApiClient.new(token: Config.token)
         blob   = client.pull_vault(vault_name)
-        data   = SyncBundle.unpack(blob)
+        data   = SyncBundle.unpack(blob, expected_name: vault_name)
 
         FileUtils.mkdir_p(store.vault_path, mode: 0o700)
         File.write(store.meta_path, data[:meta])
@@ -53,6 +53,8 @@ module LocalVault
 
         $stdout.puts "Pulled vault '#{vault_name}'."
         $stdout.puts "Unlock it with: localvault unlock -v #{vault_name}"
+      rescue SyncBundle::UnpackError => e
+        $stderr.puts "Error: #{e.message}"
       rescue ApiClient::ApiError => e
         if e.status == 404
           $stderr.puts "Error: Vault '#{vault_name}' not found in cloud."

@@ -12,7 +12,7 @@ Gem::Specification.new do |spec|
   spec.license       = "MIT"
 
   spec.metadata = {
-    "homepage_uri" => "https://github.com/inventlist/localvault",
+    "homepage_uri" => "https://inventlist.com/tools/localvault",
     "source_code_uri" => "https://github.com/inventlist/localvault",
     "funding_uri" => "https://inventlist.com"
   }
@@ -25,7 +25,7 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "thor", "~> 1.3"
   spec.add_dependency "rbnacl", "~> 7.1"
-  spec.add_dependency "base64"
+  spec.add_dependency "base64", "~> 0.2"
   spec.add_dependency "lipgloss", "~> 0.2"
 
   spec.add_development_dependency "minitest", "~> 5.0"
