@@ -146,7 +146,7 @@ module LocalVault
         raise ApiError.new(err || "HTTP #{res.code}", status: res.code.to_i)
       end
       JSON.parse(res.body)
-    rescue Errno::ECONNREFUSED, SocketError => e
+    rescue Errno::ECONNREFUSED, SocketError, Net::OpenTimeout, Net::ReadTimeout, Net::WriteTimeout => e
       raise ApiError.new("Cannot connect to #{@base_url}: #{e.message}")
     end
 
@@ -172,7 +172,7 @@ module LocalVault
         raise ApiError.new(err || "HTTP #{res.code}", status: res.code.to_i)
       end
       JSON.parse(res.body)
-    rescue Errno::ECONNREFUSED, SocketError => e
+    rescue Errno::ECONNREFUSED, SocketError, Net::OpenTimeout, Net::ReadTimeout, Net::WriteTimeout => e
       raise ApiError.new("Cannot connect to #{@base_url}: #{e.message}")
     end
 
@@ -196,7 +196,7 @@ module LocalVault
         raise ApiError.new(err || "HTTP #{res.code}", status: res.code.to_i)
       end
       res.body
-    rescue Errno::ECONNREFUSED, SocketError => e
+    rescue Errno::ECONNREFUSED, SocketError, Net::OpenTimeout, Net::ReadTimeout, Net::WriteTimeout => e
       raise ApiError.new("Cannot connect to #{@base_url}: #{e.message}")
     end
   end

@@ -102,6 +102,14 @@ jobs:
       - name: Verify RubyGems install
         run: |
           gem install localvault -v "${{ needs.release.outputs.version }}"
-          GEM_INSTALLED=$(gem list localvault --exact | head -1)
-          echo "RubyGems: $GEM_INSTALLED"
-          echo "$GEM_INSTALLED" | grep -q "${{ needs.release.outputs.version }}" || { echo "FAIL: gem version mismatch"; exit 1; }
+
+          # Verify the binary runs
+          GEM_VERSION=$(localvault version)
+          echo "RubyGems binary: $GEM_VERSION"
+          echo "$GEM_VERSION" | grep -q "${{ needs.release.outputs.version }}" || { echo "FAIL: gem binary version mismatch"; exit 1; }
+
+          # Smoke test the gem-installed binary
+          export LOCALVAULT_HOME=$(mktemp -d)
+          echo -e "testpass\ntestpass" | localvault init
+          echo "RubyGems smoke test passed"
+          rm -rf "$LOCALVAULT_HOME"

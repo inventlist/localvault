@@ -34,7 +34,9 @@ module LocalVault
             @output.flush
           end
         end
-
+      rescue Interrupt
+        # Clean shutdown on Ctrl-C
+      ensure
         $stderr.puts "[localvault-mcp] stopped"
         $stderr.flush
       end
