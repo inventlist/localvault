@@ -33,7 +33,7 @@ module LocalVault
 
       meta_raw    = Base64.strict_decode64(data.fetch("meta"))
       secrets_raw = Base64.strict_decode64(data.fetch("secrets"))
-      key_slots   = data["key_slots"] || {}
+      key_slots   = data["key_slots"].is_a?(Hash) ? data["key_slots"] : {}
 
       if expected_name
         meta_parsed = YAML.safe_load(meta_raw)

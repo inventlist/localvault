@@ -102,6 +102,46 @@ class SyncPushKeySlotTest < Minitest::Test
     assert_equal 2, slots.size
   end
 
+  # ── Malformed remote key_slots ──
+
+  def test_push_survives_malformed_key_slots_string
+    setup_identity_and_login
+
+    # Remote has key_slots as a string instead of hash
+    store = LocalVault::Store.new("default")
+    bad_blob = JSON.generate({
+      "version" => 2,
+      "meta" => Base64.strict_encode64(File.read(store.meta_path)),
+      "secrets" => Base64.strict_encode64(store.read_encrypted || ""),
+      "key_slots" => "oops"
+    })
+    @fake_client.set_response(:pull_vault, bad_blob)
+
+    push_and_capture("default")
+
+    slots = JSON.parse(last_pushed_blob)["key_slots"]
+    assert slots.is_a?(Hash), "Should recover to valid hash"
+    assert slots.key?(LocalVault::Config.inventlist_handle), "Owner slot should still be created"
+  end
+
+  def test_push_survives_malformed_key_slots_array
+    setup_identity_and_login
+
+    store = LocalVault::Store.new("default")
+    bad_blob = JSON.generate({
+      "version" => 2,
+      "meta" => Base64.strict_encode64(File.read(store.meta_path)),
+      "secrets" => Base64.strict_encode64(store.read_encrypted || ""),
+      "key_slots" => [1, 2, 3]
+    })
+    @fake_client.set_response(:pull_vault, bad_blob)
+
+    push_and_capture("default")
+
+    slots = JSON.parse(last_pushed_blob)["key_slots"]
+    assert slots.is_a?(Hash)
+  end
+
   # ── Push without identity — no key slots ──
 
   def test_push_without_identity_has_no_key_slots
