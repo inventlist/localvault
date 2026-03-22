@@ -55,7 +55,12 @@ module LocalVault
         end
 
         $stdout.puts "Pulled vault '#{vault_name}'."
-        $stdout.puts "Unlock it with: localvault unlock -v #{vault_name}"
+
+        if try_unlock_via_key_slot(vault_name, data[:key_slots])
+          $stdout.puts "Unlocked via your identity key."
+        else
+          $stdout.puts "Unlock it with: localvault unlock -v #{vault_name}"
+        end
       rescue SyncBundle::UnpackError => e
         $stderr.puts "Error: #{e.message}"
       rescue ApiClient::ApiError => e
@@ -109,6 +114,30 @@ module LocalVault
       end
 
       private
+
+      # Try to decrypt the master key from a key slot matching the current identity.
+      # On success, caches the master key in SessionCache. Returns true/false.
+      def try_unlock_via_key_slot(vault_name, key_slots)
+        return false unless key_slots.is_a?(Hash) && !key_slots.empty?
+        return false unless Identity.exists?
+
+        handle = Config.inventlist_handle
+        return false unless handle
+
+        slot = key_slots[handle]
+        return false unless slot.is_a?(Hash) && slot["enc_key"]
+
+        master_key = KeySlot.decrypt(slot["enc_key"], Identity.private_key_bytes)
+
+        # Verify the key actually works by trying to decrypt
+        vault = Vault.new(name: vault_name, master_key: master_key)
+        vault.all
+
+        SessionCache.set(vault_name, master_key)
+        true
+      rescue KeySlot::DecryptionError, Crypto::DecryptionError
+        false
+      end
 
       def logged_in?
         return true if Config.token
