@@ -121,9 +121,10 @@ class CLISyncTest < Minitest::Test
     push_call = @fake_client.calls.find { |c| c[:method] == :push_vault }
     blob   = push_call[:args][1]
     parsed = JSON.parse(blob)
-    assert_equal 1, parsed["version"]
+    assert_equal 2, parsed["version"]
     assert parsed.key?("meta"),    "bundle should contain meta"
     assert parsed.key?("secrets"), "bundle should contain secrets"
+    assert parsed.key?("key_slots"), "bundle should contain key_slots"
   end
 
   def test_sync_push_prints_confirmation
