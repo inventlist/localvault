@@ -16,7 +16,10 @@ module LocalVault
           return
         end
 
-        blob   = SyncBundle.pack(store)
+        key_slots = load_existing_key_slots(vault_name)
+        key_slots = bootstrap_owner_slot(key_slots, store)
+
+        blob   = SyncBundle.pack(store, key_slots: key_slots)
         client = ApiClient.new(token: Config.token)
         client.push_vault(vault_name, blob)
 
@@ -112,6 +115,38 @@ module LocalVault
 
         $stderr.puts "Error: Not logged in. Run: localvault login TOKEN"
         false
+      end
+
+      # Load key_slots from the last pushed blob (if any).
+      # Returns {} if no remote blob or if it's a v1 bundle.
+      def load_existing_key_slots(vault_name)
+        client = ApiClient.new(token: Config.token)
+        blob = client.pull_vault(vault_name)
+        return {} unless blob.is_a?(String) && !blob.empty?
+        data = SyncBundle.unpack(blob)
+        data[:key_slots] || {}
+      rescue ApiClient::ApiError, SyncBundle::UnpackError
+        {}
+      end
+
+      # Add the owner's key slot if identity exists and no slot is present.
+      # Requires the vault to be unlockable (needs master key for encryption).
+      def bootstrap_owner_slot(key_slots, store)
+        return key_slots unless Identity.exists?
+        handle = Config.inventlist_handle
+        return key_slots unless handle
+
+        # Already has owner slot — don't churn
+        return key_slots if key_slots.key?(handle)
+
+        # Need the master key to create the slot — try SessionCache
+        master_key = SessionCache.get(store.vault_name)
+        return key_slots unless master_key
+
+        pub_b64 = Identity.public_key
+        enc_key = KeySlot.create(master_key, pub_b64)
+        key_slots[handle] = { "pub" => pub_b64, "enc_key" => enc_key }
+        key_slots
       end
     end
   end
