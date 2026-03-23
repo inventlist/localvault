@@ -125,6 +125,50 @@ class SyncPullKeySlotTest < Minitest::Test
     assert_nil cached
   end
 
+  # ── Pull with non-string enc_key does not crash ──
+
+  def test_pull_with_integer_enc_key_falls_back
+    setup_identity_and_login
+    handle = LocalVault::Config.inventlist_handle
+    blob = build_v2_blob_with_slots({
+      handle => { "pub" => "abc", "enc_key" => 12345 }
+    })
+
+    @fake_client.set_response(:pull_vault, blob)
+    out, = pull_and_capture("myvault")
+
+    assert_match(/pulled/i, out)
+    assert_match(/unlock it with/i, out)
+  end
+
+  def test_pull_with_hash_enc_key_falls_back
+    setup_identity_and_login
+    handle = LocalVault::Config.inventlist_handle
+    blob = build_v2_blob_with_slots({
+      handle => { "pub" => "abc", "enc_key" => { "nested" => "bad" } }
+    })
+
+    @fake_client.set_response(:pull_vault, blob)
+    out, = pull_and_capture("myvault")
+
+    assert_match(/pulled/i, out)
+    assert_match(/unlock it with/i, out)
+  end
+
+  def test_pull_with_array_enc_key_falls_back
+    setup_identity_and_login
+    handle = LocalVault::Config.inventlist_handle
+    blob = build_v2_blob_with_slots({
+      handle => { "pub" => "abc", "enc_key" => [1, 2, 3] }
+    })
+
+    @fake_client.set_response(:pull_vault, blob)
+    out, = pull_and_capture("myvault")
+
+    assert_match(/pulled/i, out)
+    assert_match(/unlock it with/i, out)
+  end
+
   # ── Pull does not mutate or discard other slots ──
 
   def test_pull_preserves_key_slots_in_local_files

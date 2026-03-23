@@ -125,7 +125,7 @@ module LocalVault
         return false unless handle
 
         slot = key_slots[handle]
-        return false unless slot.is_a?(Hash) && slot["enc_key"]
+        return false unless slot.is_a?(Hash) && slot["enc_key"].is_a?(String)
 
         master_key = KeySlot.decrypt(slot["enc_key"], Identity.private_key_bytes)
 
