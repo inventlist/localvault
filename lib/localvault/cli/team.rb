@@ -114,6 +114,7 @@ module LocalVault
 
       desc "remove HANDLE", "Remove a person's access to a vault"
       method_option :vault, type: :string, aliases: "-v"
+      method_option :rotate, type: :boolean, default: false, desc: "Re-encrypt vault with new master key (full revocation)"
       def remove(handle)
         unless Config.token
           $stderr.puts "Error: Not connected. Run: localvault connect --token TOKEN --handle HANDLE"
@@ -124,6 +125,14 @@ module LocalVault
         vault_name = options[:vault] || Config.default_vault
         client = ApiClient.new(token: Config.token)
 
+        # Try sync-based key slot removal first
+        key_slots = load_key_slots(client, vault_name)
+        if key_slots && !key_slots.empty?
+          remove_key_slot(handle, vault_name, key_slots, client, rotate: options[:rotate])
+          return
+        end
+
+        # Fall back to direct share revocation
         result = client.sent_shares(vault_name: vault_name)
         share = (result["shares"] || []).find do |s|
           s["recipient_handle"] == handle && s["status"] != "revoked"
@@ -143,13 +152,71 @@ module LocalVault
       private
 
       def load_key_slots(client, vault_name)
+        return nil unless client.respond_to?(:pull_vault)
         blob = client.pull_vault(vault_name)
         return nil unless blob.is_a?(String) && !blob.empty?
         data = SyncBundle.unpack(blob)
         slots = data[:key_slots]
         slots.is_a?(Hash) ? slots : nil
-      rescue ApiClient::ApiError, SyncBundle::UnpackError
+      rescue ApiClient::ApiError, SyncBundle::UnpackError, NoMethodError
         nil
+      end
+
+      def remove_key_slot(handle, vault_name, key_slots, client, rotate: false)
+        unless key_slots.key?(handle)
+          $stderr.puts "Error: @#{handle} has no slot in vault '#{vault_name}'."
+          return
+        end
+
+        valid_slots = key_slots.select { |_, v| v.is_a?(Hash) && v["pub"].is_a?(String) }
+        if handle == Config.inventlist_handle && valid_slots.size <= 1
+          $stderr.puts "Error: Cannot remove yourself — you are the only member."
+          return
+        end
+
+        key_slots.delete(handle)
+        store = Store.new(vault_name)
+
+        if rotate
+          master_key = SessionCache.get(vault_name)
+          unless master_key
+            $stderr.puts "Error: Vault '#{vault_name}' is not unlocked. Run: localvault show -v #{vault_name}"
+            return
+          end
+
+          # Decrypt current secrets, generate new master key, re-encrypt
+          vault = Vault.new(name: vault_name, master_key: master_key)
+          secrets = vault.all
+
+          new_salt = Crypto.generate_salt
+          new_master_key = Crypto.derive_master_key(SecureRandom.hex(32), new_salt)
+
+          # Re-encrypt secrets with new master key
+          new_json = JSON.generate(secrets)
+          new_encrypted = Crypto.encrypt(new_json, new_master_key)
+          store.write_encrypted(new_encrypted)
+          store.create_meta!(salt: new_salt)
+
+          # Re-create key slots for remaining members with new master key
+          new_slots = {}
+          key_slots.each do |h, slot|
+            next unless slot.is_a?(Hash) && slot["pub"].is_a?(String)
+            new_slots[h] = { "pub" => slot["pub"], "enc_key" => KeySlot.create(new_master_key, slot["pub"]) }
+          end
+
+          blob = SyncBundle.pack(store, key_slots: new_slots)
+          client.push_vault(vault_name, blob)
+
+          # Cache the new master key
+          SessionCache.set(vault_name, new_master_key)
+
+          $stdout.puts "Removed @#{handle} from vault '#{vault_name}'."
+          $stdout.puts "Vault re-encrypted with new master key (rotated)."
+        else
+          blob = SyncBundle.pack(store, key_slots: key_slots)
+          client.push_vault(vault_name, blob)
+          $stdout.puts "Removed @#{handle} from vault '#{vault_name}'."
+        end
       end
 
       def list_key_slots(vault_name, key_slots)
