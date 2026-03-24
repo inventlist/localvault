@@ -115,6 +115,17 @@ class TeamAddTest < Minitest::Test
     assert_match(/no public key|not found/i, err)
   end
 
+  def test_team_add_fails_cleanly_on_malformed_public_key
+    @fake_client.set_public_key("bob", "not-base64!!!")
+    @fake_client.set_pull_response(current_blob_with_owner_slot)
+
+    _, err = run_team_add("@bob", "production")
+
+    assert_match(/invalid|error/i, err)
+    # Should not have pushed anything
+    assert_nil @fake_client.calls.find { |c| c[:method] == :push_vault }
+  end
+
   def test_team_add_strips_at_prefix_from_handle
     bob_kp = RbNaCl::PrivateKey.generate
     bob_pub = Base64.strict_encode64(bob_kp.public_key.to_bytes)

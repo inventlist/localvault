@@ -86,7 +86,12 @@ module LocalVault
                     end
 
         # Create key slot for recipient
-        enc_key = KeySlot.create(master_key, pub_key)
+        begin
+          enc_key = KeySlot.create(master_key, pub_key)
+        rescue ArgumentError, KeySlot::DecryptionError => e
+          $stderr.puts "Error: @#{handle}'s public key is invalid: #{e.message}"
+          return
+        end
         key_slots[handle] = { "pub" => pub_key, "enc_key" => enc_key }
 
         # Ensure owner slot exists too
@@ -207,8 +212,12 @@ module LocalVault
           blob = SyncBundle.pack(store, key_slots: new_slots)
           client.push_vault(vault_name, blob)
 
-          # Cache the new master key
-          SessionCache.set(vault_name, new_master_key)
+          # Only cache new master key if the caller is still a member
+          if new_slots.key?(Config.inventlist_handle)
+            SessionCache.set(vault_name, new_master_key)
+          else
+            SessionCache.clear(vault_name)
+          end
 
           $stdout.puts "Removed @#{handle} from vault '#{vault_name}'."
           $stdout.puts "Vault re-encrypted with new master key (rotated)."

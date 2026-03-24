@@ -115,6 +115,21 @@ class TeamRemoveSyncTest < Minitest::Test
     assert_match(/not connected|not logged/i, err)
   end
 
+  # ── Self-remove with --rotate clears local access ──
+
+  def test_rotate_self_remove_clears_session_cache
+    blob = build_blob_with_slots({
+      "alice" => slot_for(LocalVault::Identity.public_key),
+      "bob"   => slot_for(@bob_pub)
+    })
+    @fake_client.set_pull_response(blob)
+
+    run_team_remove_rotate("@alice", "production")
+
+    cached = LocalVault::SessionCache.get("production")
+    assert_nil cached, "Self-remove with --rotate should clear local session cache"
+  end
+
   # ── Remove with --rotate ──
 
   def test_rotate_reencrypts_and_pushes_new_slots
