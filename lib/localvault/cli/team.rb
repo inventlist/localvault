@@ -13,6 +13,15 @@ module LocalVault
 
         vault_name ||= options[:vault] || Config.default_vault
         client = ApiClient.new(token: Config.token)
+
+        # Try sync-based key slots first
+        key_slots = load_key_slots(client, vault_name)
+        if key_slots && !key_slots.empty?
+          list_key_slots(vault_name, key_slots)
+          return
+        end
+
+        # Fall back to direct shares
         result = client.sent_shares(vault_name: vault_name)
         shares = (result["shares"] || []).reject { |s| s["status"] == "revoked" }
 
@@ -129,6 +138,35 @@ module LocalVault
         $stdout.puts "Removed @#{handle} from vault '#{vault_name}'."
       rescue ApiClient::ApiError => e
         $stderr.puts "Error: #{e.message}"
+      end
+
+      private
+
+      def load_key_slots(client, vault_name)
+        blob = client.pull_vault(vault_name)
+        return nil unless blob.is_a?(String) && !blob.empty?
+        data = SyncBundle.unpack(blob)
+        slots = data[:key_slots]
+        slots.is_a?(Hash) ? slots : nil
+      rescue ApiClient::ApiError, SyncBundle::UnpackError
+        nil
+      end
+
+      def list_key_slots(vault_name, key_slots)
+        my_handle = Config.inventlist_handle
+        valid = key_slots.select { |_, v| v.is_a?(Hash) && v["pub"].is_a?(String) }
+
+        if valid.empty?
+          $stdout.puts "No key slots for vault '#{vault_name}'."
+          return
+        end
+
+        $stdout.puts "Vault: #{vault_name} — #{valid.size} member(s)"
+        $stdout.puts
+        valid.sort.each do |handle, slot|
+          marker = handle == my_handle ? " (you)" : ""
+          $stdout.puts "  @#{handle}#{marker}"
+        end
       end
     end
   end
