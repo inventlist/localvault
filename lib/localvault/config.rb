@@ -2,6 +2,17 @@ require "yaml"
 require "fileutils"
 
 module LocalVault
+  # Global configuration — paths, default vault, API credentials.
+  #
+  # Reads/writes +~/.localvault/config.yml+ (mode 0600).
+  # All directories are created with mode 0700.
+  # Override the root path with +LOCALVAULT_HOME+ env var.
+  #
+  # @example
+  #   Config.root_path        # => "~/.localvault"
+  #   Config.default_vault    # => "default"
+  #   Config.token = "tok-..."
+  #   Config.inventlist_handle = "nauman"
   module Config
     CONFIG_FILE = "config.yml"
 

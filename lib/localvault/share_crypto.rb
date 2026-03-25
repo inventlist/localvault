@@ -3,7 +3,20 @@ require "base64"
 require "json"
 
 module LocalVault
+  # Asymmetric encryption for one-time vault sharing (direct share model).
+  #
+  # Encrypts a secrets hash for a recipient using their X25519 public key.
+  # Uses an ephemeral sender keypair so the sender's identity key is never
+  # transmitted. The recipient decrypts with their private key.
+  #
+  # This is used for the +localvault share --with @handle+ flow (one-time
+  # handoff). For ongoing team access, see KeySlot.
+  #
+  # @example Encrypt and decrypt a share
+  #   payload = ShareCrypto.encrypt_for({"KEY" => "val"}, recipient_pub_b64)
+  #   secrets = ShareCrypto.decrypt_from(payload, recipient_priv_bytes)
   module ShareCrypto
+    # Raised when decryption fails (wrong key, tampered payload, or invalid format).
     class DecryptionError < StandardError; end
 
     # Encrypt a secrets hash for a recipient using their X25519 public key.

@@ -2,6 +2,20 @@ require "base64"
 require "fileutils"
 
 module LocalVault
+  # Manages the user's X25519 identity keypair for vault sharing and sync.
+  #
+  # The keypair is stored in +~/.localvault/keys/+:
+  # - +identity.priv+ (mode 0600) — base64-encoded private key
+  # - +identity.pub+ (mode 0644) — base64-encoded public key
+  #
+  # The public key is published to InventList so others can encrypt
+  # key slots for you. The private key never leaves the local machine.
+  #
+  # @example
+  #   Identity.generate!
+  #   Identity.public_key       # => "base64..."
+  #   Identity.private_key_bytes # => 32 raw bytes
+  #   Identity.setup?           # => true (if keypair + token exist)
   module Identity
     def self.priv_key_path = File.join(Config.keys_path, "identity.priv")
     def self.pub_key_path  = File.join(Config.keys_path, "identity.pub")

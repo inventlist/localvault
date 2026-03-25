@@ -5,7 +5,22 @@ require "base64"
 require "time"
 
 module LocalVault
+  # File-system storage for a single vault's encrypted data and metadata.
+  #
+  # Each vault lives at +~/.localvault/vaults/<name>/+ with two files:
+  # - +meta.yml+ — salt, creation date, version, secret count
+  # - +secrets.enc+ — encrypted JSON blob (XSalsa20-Poly1305)
+  #
+  # Uses atomic writes (tempfile + rename) to prevent corruption.
+  # All directories are created with mode 0700, all files with mode 0600.
+  #
+  # @example
+  #   store = Store.new("production")
+  #   store.create!(salt: Crypto.generate_salt)
+  #   store.write_encrypted(ciphertext)
+  #   store.read_encrypted  # => ciphertext bytes
   class Store
+    # Raised when a vault name contains invalid characters or path traversal.
     class InvalidVaultName < StandardError; end
 
     # Letters, digits, underscore, dash. Must start with alphanumeric.

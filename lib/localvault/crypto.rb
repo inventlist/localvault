@@ -22,7 +22,20 @@ rescue LoadError => e
 end
 
 module LocalVault
+  # Cryptographic primitives for vault encryption and key derivation.
+  #
+  # Uses libsodium (via RbNaCl) exclusively:
+  # - Argon2id for passphrase → master key derivation (memory-hard KDF)
+  # - XSalsa20-Poly1305 for authenticated symmetric encryption
+  # - X25519 for asymmetric keypair generation (used by Identity + KeySlot)
+  #
+  # @example Derive a master key and encrypt
+  #   salt = Crypto.generate_salt
+  #   key  = Crypto.derive_master_key("my passphrase", salt)
+  #   ct   = Crypto.encrypt("secret data", key)
+  #   Crypto.decrypt(ct, key)  # => "secret data"
   module Crypto
+    # Raised when decryption fails (wrong key, tampered data, or corrupt ciphertext).
     class DecryptionError < StandardError; end
 
     SALT_BYTES = 16

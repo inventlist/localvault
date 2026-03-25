@@ -75,6 +75,13 @@ localvault exec -- node app.js
 | `vaults` | List all vaults |
 | `unlock` | Output a session token for passphrase-free access |
 | `reset [NAME]` | Destroy all secrets and reinitialize with a new passphrase |
+| `login TOKEN` | Log in to InventList (auto-keygen + publish public key) |
+| `sync push` | Push vault to InventList cloud |
+| `sync pull` | Pull vault from InventList cloud |
+| `sync status` | Show sync state for all vaults |
+| `team add @handle` | Add a teammate to a synced vault |
+| `team remove @handle` | Remove a teammate (with optional `--rotate`) |
+| `team list` | Show who has access to a synced vault |
 | `version` | Print version |
 
 All vault commands accept `--vault NAME` (or `-v NAME`) to target a specific vault. Defaults to `default`.
@@ -147,6 +154,46 @@ localvault reset
 
 Works on named vaults too: `localvault reset production`. All secrets are gone — there is no recovery.
 
+## Cloud Sync
+
+Sync vaults across devices via [InventList](https://inventlist.com). Your secrets stay encrypted — the server never sees plaintext.
+
+```bash
+# Log in (auto-generates keypair + publishes public key)
+localvault login YOUR_TOKEN
+
+# Push a vault to the cloud
+localvault sync push
+
+# Pull on another device
+localvault sync pull
+
+# Check sync status
+localvault sync status
+```
+
+## Team Sharing
+
+Share vault access with teammates using X25519 key slots. Each member's master key copy is encrypted to their public key — the server only stores ciphertext.
+
+```bash
+# Add a teammate (they need a published public key on InventList)
+localvault team add @bob -v production
+
+# See who has access
+localvault team list -v production
+# => @alice (you)
+# => @bob
+
+# Remove access (stops future sync pulls)
+localvault team remove @bob -v production
+
+# Remove + re-encrypt vault with new master key (full revocation)
+localvault team remove @bob -v production --rotate
+```
+
+When a teammate pulls a vault they have a key slot for, it auto-unlocks via their identity key — no passphrase needed.
+
 ## MCP Server (AI Agents)
 
 LocalVault includes an MCP server so AI coding agents can read and manage secrets via the Model Context Protocol — without ever seeing your passphrase.
@@ -186,7 +233,7 @@ See [MCP for AI Agents](https://inventlist.com/sites/localvault/series/localvaul
 |-------|-----------|---------|
 | Key derivation | **Argon2id** (64 MB, 2 iterations) | Passphrase to master key |
 | Encryption | **XSalsa20-Poly1305** | Authenticated encryption of secrets |
-| Key exchange | **X25519** | Future: shared vaults |
+| Key exchange | **X25519** | Team key slots + vault sharing |
 
 - Every encryption uses a random 24-byte nonce
 - Authentication tag prevents tampering (Poly1305)
@@ -205,7 +252,7 @@ See [MCP for AI Agents](https://inventlist.com/sites/localvault/series/localvaul
 │   └── production/
 │       ├── meta.yml
 │       └── secrets.enc
-└── keys/                   # Future: shared vault keys
+└── keys/                   # X25519 identity keypair for sync + team access
 ```
 
 - Secrets are stored as a single encrypted JSON blob per vault

@@ -3,7 +3,19 @@ require "uri"
 require "json"
 
 module LocalVault
+  # HTTP client for the InventList API (vault sync, sharing, public keys).
+  #
+  # All requests use Bearer token auth. Timeouts: 10s open, 30s read/write.
+  # Network and timeout errors are wrapped as ApiError so callers get a
+  # consistent exception type.
+  #
+  # @example
+  #   client = ApiClient.new(token: "tok-...", base_url: "https://inventlist.com")
+  #   client.me                         # => {"user" => {"handle" => "nauman"}}
+  #   client.push_vault("prod", blob)   # => {"name" => "prod", ...}
+  #   client.pull_vault("prod")         # => raw binary blob
   class ApiClient
+    # Raised on HTTP errors, network failures, and timeouts.
     class ApiError < StandardError
       attr_reader :status
 

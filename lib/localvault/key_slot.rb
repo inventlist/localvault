@@ -2,7 +2,18 @@ require "rbnacl"
 require "base64"
 
 module LocalVault
+  # Encrypts/decrypts a vault's master key for a specific user's X25519 public key.
+  #
+  # Key slots enable multi-user vault access via sync. Each authorized user
+  # has a slot containing the vault's master key encrypted to their public key.
+  # Uses an ephemeral sender keypair (X25519 Box) — same construction as ShareCrypto.
+  #
+  # @example Create and decrypt a key slot
+  #   slot = KeySlot.create(master_key, recipient_pub_b64)
+  #   recovered = KeySlot.decrypt(slot, recipient_priv_bytes)
+  #   recovered == master_key  # => true
   module KeySlot
+    # Raised when decryption fails (wrong key, tampered data, or invalid format).
     class DecryptionError < StandardError; end
 
     # Encrypt a master key for a recipient's X25519 public key.

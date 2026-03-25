@@ -3,7 +3,25 @@ require "base64"
 require "yaml"
 
 module LocalVault
+  # Packs and unpacks vault data for cloud sync via InventList + R2.
+  #
+  # A bundle is a JSON blob containing:
+  # - +version+ — bundle format version (currently 2)
+  # - +meta+ — base64-encoded meta.yml (salt, name, timestamps)
+  # - +secrets+ — base64-encoded secrets.enc (already encrypted)
+  # - +key_slots+ — hash of per-user encrypted master keys (v2+)
+  #
+  # The server never sees plaintext — the bundle is opaque ciphertext.
+  # v1 bundles (no key_slots) are supported for backward compatibility.
+  #
+  # @example Pack and unpack
+  #   blob = SyncBundle.pack(store, key_slots: {"alice" => {...}})
+  #   data = SyncBundle.unpack(blob, expected_name: "myvault")
+  #   data[:meta]      # => YAML string
+  #   data[:secrets]   # => encrypted bytes
+  #   data[:key_slots] # => {"alice" => {...}}
   module SyncBundle
+    # Raised when unpacking fails (bad JSON, missing fields, wrong version, invalid encoding).
     class UnpackError < StandardError; end
 
     VERSION = 2

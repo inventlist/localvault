@@ -3,12 +3,21 @@ require "fileutils"
 require "shellwords"
 
 module LocalVault
-  # Caches derived master keys in macOS Keychain (or a fallback file store).
-  # Avoids re-prompting passphrase on every command.
+  # Caches derived master keys to avoid re-prompting passphrase on every command.
   #
-  # Stored payload: "<base64_key>|<expiry_unix_ts>"
-  # macOS: Keychain service "localvault", account: vault name
-  # Linux/other: ~/.localvault/.sessions/<vault_name> (mode 0600)
+  # On macOS, uses the system Keychain (service "localvault", account = vault name).
+  # Falls back to file-based cache at +~/.localvault/.sessions/+ (mode 0600)
+  # when Keychain is unavailable (CI, sandboxed, Linux).
+  #
+  # Entries expire after +DEFAULT_TTL_HOURS+ (8 hours). Expired entries are
+  # cleaned up on read.
+  #
+  # Stored payload format: +"<base64_key>|<expiry_unix_ts>"+
+  #
+  # @example
+  #   SessionCache.set("production", master_key)
+  #   SessionCache.get("production")  # => master_key bytes (or nil if expired)
+  #   SessionCache.clear("production")
   module SessionCache
     DEFAULT_TTL_HOURS = 8
     KEYCHAIN_SERVICE  = "localvault"

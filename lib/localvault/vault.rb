@@ -2,10 +2,31 @@ require "json"
 require "shellwords"
 
 module LocalVault
+  # Encrypted key-value store backed by a single JSON blob.
+  #
+  # Each vault has a name, a master key (derived from passphrase + salt),
+  # and a Store that handles file I/O. Secrets are stored as a flat or
+  # nested JSON hash, encrypted with XSalsa20-Poly1305.
+  #
+  # Supports dot-notation for nested keys: +"project.SECRET_KEY"+
+  # groups secrets under a project namespace.
+  #
+  # @example Basic usage
+  #   vault = Vault.create!(name: "default", master_key: key, salt: salt)
+  #   vault.set("API_KEY", "sk-...")
+  #   vault.get("API_KEY")    # => "sk-..."
+  #   vault.list              # => ["API_KEY"]
+  #   vault.export_env        # => "export API_KEY=sk-..."
+  #
+  # @example Nested keys
+  #   vault.set("myapp.DB_URL", "postgres://...")
+  #   vault.get("myapp.DB_URL")  # => "postgres://..."
+  #   vault.env_hash(project: "myapp")  # => {"DB_URL" => "postgres://..."}
   class Vault
+    # Raised when a key name contains invalid characters.
     class InvalidKeyName < StandardError; end
 
-    # Shell-safe: letters, digits, underscores. Must start with letter or underscore.
+    # Shell-safe pattern: letters, digits, underscores. Must start with letter or underscore.
     KEY_SEGMENT_PATTERN = /\A[A-Za-z_][A-Za-z0-9_]*\z/
 
     attr_reader :name, :master_key, :store
