@@ -2,6 +2,7 @@ require "yaml"
 require "fileutils"
 require "tempfile"
 require "base64"
+require "time"
 
 module LocalVault
   class Store
