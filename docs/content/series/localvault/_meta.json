@@ -12,6 +12,8 @@
     { "id": "05", "file": "05-designing-sync.md", "type": "journey" },
     { "id": "06", "file": "06-sync-how-it-works.md", "type": "doc" },
     { "id": "07", "file": "07-security-model.md", "type": "doc" },
-    { "id": "08", "file": "08-cli-reference.md", "type": "doc" }
+    { "id": "08", "file": "08-cli-reference.md", "type": "doc" },
+    { "id": "09", "file": "09-team-sync-and-key-slots.md", "type": "doc" },
+    { "id": "10", "file": "10-mcp-config-leaking-secrets.md", "type": "journey" }
   ]
 }
