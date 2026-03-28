@@ -142,7 +142,13 @@ module LocalVault
       def logged_in?
         return true if Config.token
 
-        $stderr.puts "Error: Not logged in. Run: localvault login TOKEN"
+        $stderr.puts "Error: Not logged in."
+        $stderr.puts
+        $stderr.puts "  localvault login YOUR_TOKEN"
+        $stderr.puts
+        $stderr.puts "Get your token at: https://inventlist.com/settings"
+        $stderr.puts "New to InventList? Sign up free at https://inventlist.com"
+        $stderr.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
         false
       end
 

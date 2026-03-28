@@ -8,7 +8,13 @@ module LocalVault
       method_option :vault, type: :string, aliases: "-v"
       def list(vault_name = nil)
         unless Config.token
-          $stderr.puts "Error: Not connected. Run: localvault connect --token TOKEN --handle HANDLE"
+          $stderr.puts "Error: Not logged in."
+          $stderr.puts
+          $stderr.puts "  localvault login YOUR_TOKEN"
+          $stderr.puts
+          $stderr.puts "Get your token at: https://inventlist.com/settings"
+          $stderr.puts "New to InventList? Sign up free at https://inventlist.com"
+          $stderr.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
           return
         end
 
@@ -48,7 +54,13 @@ module LocalVault
       method_option :vault, type: :string, aliases: "-v"
       def add(handle)
         unless Config.token
-          $stderr.puts "Error: Not logged in. Run: localvault login TOKEN"
+          $stderr.puts "Error: Not logged in."
+          $stderr.puts
+          $stderr.puts "  localvault login YOUR_TOKEN"
+          $stderr.puts
+          $stderr.puts "Get your token at: https://inventlist.com/settings"
+          $stderr.puts "New to InventList? Sign up free at https://inventlist.com"
+          $stderr.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
           return
         end
 
@@ -123,7 +135,13 @@ module LocalVault
       method_option :rotate, type: :boolean, default: false, desc: "Re-encrypt vault with new master key (full revocation)"
       def remove(handle)
         unless Config.token
-          $stderr.puts "Error: Not connected. Run: localvault connect --token TOKEN --handle HANDLE"
+          $stderr.puts "Error: Not logged in."
+          $stderr.puts
+          $stderr.puts "  localvault login YOUR_TOKEN"
+          $stderr.puts
+          $stderr.puts "Get your token at: https://inventlist.com/settings"
+          $stderr.puts "New to InventList? Sign up free at https://inventlist.com"
+          $stderr.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
           return
         end
 

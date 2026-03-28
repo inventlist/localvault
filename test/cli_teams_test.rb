@@ -101,7 +101,7 @@ class CLITeamsTest < Minitest::Test
   def test_revoke_requires_token
     cli = LocalVault::CLI.new([], {}, {})
     err = capture_io { cli.revoke("99") }.last
-    assert_includes err, "Not connected"
+    assert_includes err, "Not logged in"
   end
 
   def test_revoke_calls_api
@@ -124,7 +124,7 @@ class CLITeamsTest < Minitest::Test
   def test_team_list_requires_token
     cli = LocalVault::CLI::Team.new([], {}, {})
     err = capture_io { cli.list }.last
-    assert_includes err, "Not connected"
+    assert_includes err, "Not logged in"
   end
 
   def test_team_list_shows_no_shares
@@ -160,7 +160,7 @@ class CLITeamsTest < Minitest::Test
   def test_team_remove_requires_token
     cli = LocalVault::CLI::Team.new([], {}, {})
     err = capture_io { cli.remove("@bob") }.last
-    assert_includes err, "Not connected"
+    assert_includes err, "Not logged in"
   end
 
   def test_team_remove_strips_at_sign
@@ -254,7 +254,7 @@ class CLITeamsTest < Minitest::Test
   def test_share_requires_token
     cli = LocalVault::CLI.new([], { with: "@bob" }, {})
     err = capture_io { cli.share }.last
-    assert_includes err, "Not connected"
+    assert_includes err, "Not logged in"
   end
 
   def test_share_requires_keypair
@@ -269,7 +269,7 @@ class CLITeamsTest < Minitest::Test
   def test_receive_requires_token
     cli = LocalVault::CLI.new([], {}, {})
     err = capture_io { cli.receive }.last
-    assert_includes err, "Not connected"
+    assert_includes err, "Not logged in"
   end
 
   def test_receive_requires_keypair

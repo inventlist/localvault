@@ -487,8 +487,15 @@ module LocalVault
       end
 
       unless token
-        $stdout.puts "Usage: localvault login TOKEN"
+        $stdout.puts "Usage: localvault login YOUR_TOKEN"
+        $stdout.puts
         $stdout.puts "Get your token at: https://inventlist.com/settings"
+        $stdout.puts "New to InventList? Sign up free at https://inventlist.com"
+        $stdout.puts
+        $stdout.puts "LocalVault sync and team features require a free InventList account."
+        $stdout.puts "Local vault encryption works without an account."
+        $stdout.puts
+        $stdout.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
         return
       end
 
@@ -547,7 +554,7 @@ module LocalVault
       desc: "Recipient: @handle, team:HANDLE, or crew:SLUG"
     def share(vault_name = nil)
       unless Config.token
-        abort_with "Not connected. Run: localvault connect --token TOKEN --handle HANDLE"
+        abort_with "Not logged in. Run: localvault login YOUR_TOKEN\n  Get your token at: https://inventlist.com/settings"
         return
       end
 
@@ -590,7 +597,7 @@ module LocalVault
     desc "receive", "Fetch and import vaults shared with you"
     def receive
       unless Config.token
-        abort_with "Not connected. Run: localvault connect --token TOKEN --handle HANDLE"
+        abort_with "Not logged in. Run: localvault login YOUR_TOKEN\n  Get your token at: https://inventlist.com/settings"
         return
       end
 
@@ -658,7 +665,7 @@ module LocalVault
     desc "revoke SHARE_ID", "Revoke a vault share (stops future access)"
     def revoke(share_id)
       unless Config.token
-        abort_with "Not connected. Run: localvault connect --token TOKEN --handle HANDLE"
+        abort_with "Not logged in. Run: localvault login YOUR_TOKEN\n  Get your token at: https://inventlist.com/settings"
         return
       end
 
