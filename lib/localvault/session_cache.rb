@@ -96,8 +96,7 @@ module LocalVault
         # Fall back to file store if Keychain fails (e.g., in CI or sandboxed env)
         unless success
           file = session_file(vault_name)
-          File.write(file, payload)
-          File.chmod(0o600, file)
+          File.write(file, payload, perm: 0o600)
         end
       else
         keychain_delete(vault_name)

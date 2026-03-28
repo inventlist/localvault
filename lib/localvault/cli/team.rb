@@ -1,4 +1,5 @@
 require "thor"
+require "securerandom"
 
 module LocalVault
   class CLI
@@ -221,6 +222,8 @@ module LocalVault
 
           $stdout.puts "Removed @#{handle} from vault '#{vault_name}'."
           $stdout.puts "Vault re-encrypted with new master key (rotated)."
+          $stderr.puts "Note: This vault is now key-slot-only. Passphrase-based access will not work."
+          $stderr.puts "Authorized members: #{new_slots.keys.map { |h| "@#{h}" }.join(", ")}"
         else
           blob = SyncBundle.pack(store, key_slots: key_slots)
           client.push_vault(vault_name, blob)
