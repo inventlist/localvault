@@ -131,20 +131,17 @@ module LocalVault
 
       desc "add HANDLE", "Add a teammate to a synced vault via key slot"
       method_option :vault, type: :string, aliases: "-v"
+      method_option :scope, type: :array, desc: "Groups or keys to share (omit for full access)"
       # Grant a user access to a synced vault by creating a key slot.
       #
-      # Fetches the recipient's public key from InventList, encrypts the vault's
-      # master key for them, adds the key slot to the bundle, and pushes. The
-      # vault must be unlocked locally. Also ensures the owner's own key slot exists.
+      # With --scope, creates a per-member encrypted blob containing only the
+      # specified keys. Without --scope, grants full vault access.
+      # Requires the vault to be a team vault (run team init first).
       def add(handle)
         unless Config.token
           $stderr.puts "Error: Not logged in."
-          $stderr.puts
-          $stderr.puts "  localvault login YOUR_TOKEN"
-          $stderr.puts
+          $stderr.puts "\n  localvault login YOUR_TOKEN\n"
           $stderr.puts "Get your token at: https://inventlist.com/settings"
-          $stderr.puts "New to InventList? Sign up free at https://inventlist.com"
-          $stderr.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
           return
         end
 
@@ -155,55 +152,99 @@ module LocalVault
 
         handle = handle.delete_prefix("@")
         vault_name = options[:vault] || Config.default_vault
+        scope_list = options[:scope]
 
-        # Need master key from session
         master_key = SessionCache.get(vault_name)
         unless master_key
           $stderr.puts "Error: Vault '#{vault_name}' is not unlocked. Run: localvault show -v #{vault_name}"
           return
         end
 
-        # Fetch recipient's public key
         client = ApiClient.new(token: Config.token)
+
+        # Load existing bundle — must be a team vault (v3)
+        existing_blob = client.pull_vault(vault_name) rescue nil
+        unless existing_blob.is_a?(String) && !existing_blob.empty?
+          $stderr.puts "Error: Vault '#{vault_name}' is not a team vault. Run: localvault team init -v #{vault_name}"
+          return
+        end
+
+        data = SyncBundle.unpack(existing_blob)
+        unless data[:owner]
+          $stderr.puts "Error: Vault '#{vault_name}' is not a team vault. Run: localvault team init -v #{vault_name}"
+          return
+        end
+
+        # Only owner can add members
+        unless data[:owner] == Config.inventlist_handle
+          $stderr.puts "Error: Only the vault owner (@#{data[:owner]}) can manage team access."
+          return
+        end
+
+        key_slots = data[:key_slots].is_a?(Hash) ? data[:key_slots] : {}
+
+        # Check if member already has full access
+        if key_slots.key?(handle) && key_slots[handle].is_a?(Hash) && key_slots[handle]["scopes"].nil?
+          if scope_list
+            $stdout.puts "@#{handle} already has full vault access."
+            return
+          end
+        end
+
+        # Fetch recipient's public key
         result = client.get_public_key(handle)
         pub_key = result["public_key"]
-
         unless pub_key && !pub_key.empty?
           $stderr.puts "Error: @#{handle} has no public key published."
           return
         end
 
-        # Load existing key slots from remote
-        existing_blob = client.pull_vault(vault_name) rescue nil
-        key_slots = if existing_blob.is_a?(String) && !existing_blob.empty?
-                      data = SyncBundle.unpack(existing_blob)
-                      data[:key_slots].is_a?(Hash) ? data[:key_slots] : {}
-                    else
-                      {}
-                    end
+        if scope_list
+          # Accumulate scopes if member already has some
+          existing_scopes = key_slots.dig(handle, "scopes") || []
+          merged_scopes = (existing_scopes + scope_list).uniq
 
-        # Create key slot for recipient
-        begin
-          enc_key = KeySlot.create(master_key, pub_key)
-        rescue ArgumentError, KeySlot::DecryptionError => e
-          $stderr.puts "Error: @#{handle}'s public key is invalid: #{e.message}"
-          return
+          # Create per-member blob with filtered secrets
+          vault = Vault.new(name: vault_name, master_key: master_key)
+          filtered = vault.filter(merged_scopes)
+
+          member_key = RbNaCl::Random.random_bytes(32)
+          encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)
+
+          begin
+            enc_key = KeySlot.create(member_key, pub_key)
+          rescue ArgumentError, KeySlot::DecryptionError => e
+            $stderr.puts "Error: @#{handle}'s public key is invalid: #{e.message}"
+            return
+          end
+
+          key_slots[handle] = {
+            "pub" => pub_key,
+            "enc_key" => enc_key,
+            "scopes" => merged_scopes,
+            "blob" => Base64.strict_encode64(encrypted_blob)
+          }
+        else
+          # Full vault access — encrypt master key directly
+          begin
+            enc_key = KeySlot.create(master_key, pub_key)
+          rescue ArgumentError, KeySlot::DecryptionError => e
+            $stderr.puts "Error: @#{handle}'s public key is invalid: #{e.message}"
+            return
+          end
+
+          key_slots[handle] = { "pub" => pub_key, "enc_key" => enc_key, "scopes" => nil, "blob" => nil }
         end
-        key_slots[handle] = { "pub" => pub_key, "enc_key" => enc_key }
 
-        # Ensure owner slot exists too
-        owner_handle = Config.inventlist_handle
-        unless key_slots.key?(owner_handle)
-          owner_pub = Identity.public_key
-          key_slots[owner_handle] = { "pub" => owner_pub, "enc_key" => KeySlot.create(master_key, owner_pub) }
-        end
-
-        # Pack and push
         store = Store.new(vault_name)
-        blob = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: key_slots)
+        blob = SyncBundle.pack_v3(store, owner: data[:owner], key_slots: key_slots)
         client.push_vault(vault_name, blob)
 
-        $stdout.puts "Added @#{handle} to vault '#{vault_name}'."
+        if scope_list
+          $stdout.puts "Added @#{handle} to vault '#{vault_name}' (scopes: #{key_slots[handle]["scopes"].join(", ")})."
+        else
+          $stdout.puts "Added @#{handle} to vault '#{vault_name}'."
+        end
       rescue ApiClient::ApiError => e
         if e.status == 404
           $stderr.puts "Error: @#{handle} not found or has no public key."

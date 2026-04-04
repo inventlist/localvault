@@ -131,8 +131,13 @@ module LocalVault
 
       private
 
-      # Try to decrypt the master key from a key slot matching the current identity.
-      # On success, caches the master key in SessionCache. Returns true/false.
+      # Try to decrypt via key slot matching the current identity.
+      #
+      # For full-access members (scopes: nil): decrypts enc_key to get the master key.
+      # For scoped members (scopes: [...]): decrypts enc_key to get the per-member key,
+      # then decrypts the per-member blob and writes it as the local vault's secrets.
+      #
+      # On success, caches the key in SessionCache. Returns true/false.
       def try_unlock_via_key_slot(vault_name, key_slots)
         return false unless key_slots.is_a?(Hash) && !key_slots.empty?
         return false unless Identity.exists?
@@ -143,15 +148,29 @@ module LocalVault
         slot = key_slots[handle]
         return false unless slot.is_a?(Hash) && slot["enc_key"].is_a?(String)
 
-        master_key = KeySlot.decrypt(slot["enc_key"], Identity.private_key_bytes)
+        decrypted_key = KeySlot.decrypt(slot["enc_key"], Identity.private_key_bytes)
 
-        # Verify the key actually works by trying to decrypt
-        vault = Vault.new(name: vault_name, master_key: master_key)
-        vault.all
+        if slot["scopes"].is_a?(Array) && slot["blob"].is_a?(String)
+          # Scoped member: decrypt per-member blob and write as local vault
+          blob_encrypted = Base64.strict_decode64(slot["blob"])
+          filtered_json = Crypto.decrypt(blob_encrypted, decrypted_key)
+          # Verify it's valid JSON
+          JSON.parse(filtered_json)
 
-        SessionCache.set(vault_name, master_key)
+          # Re-encrypt the filtered secrets with the member key as local "master key"
+          store = Store.new(vault_name)
+          store.write_encrypted(Crypto.encrypt(filtered_json, decrypted_key))
+
+          SessionCache.set(vault_name, decrypted_key)
+        else
+          # Full-access member: decrypted_key IS the master key
+          vault = Vault.new(name: vault_name, master_key: decrypted_key)
+          vault.all  # verify
+
+          SessionCache.set(vault_name, decrypted_key)
+        end
         true
-      rescue KeySlot::DecryptionError, Crypto::DecryptionError
+      rescue KeySlot::DecryptionError, Crypto::DecryptionError, ArgumentError, JSON::ParserError
         false
       end
 
