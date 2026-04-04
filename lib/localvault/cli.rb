@@ -544,7 +544,7 @@ module LocalVault
       unless token
         $stdout.puts "Usage: localvault login YOUR_TOKEN"
         $stdout.puts
-        $stdout.puts "Get your token at: https://inventlist.com/settings"
+        $stdout.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
         $stdout.puts "New to InventList? Sign up free at https://inventlist.com"
         $stdout.puts
         $stdout.puts "LocalVault sync and team features require a free InventList account."
@@ -572,7 +572,7 @@ module LocalVault
       $stdout.puts "Next: localvault sync push   # sync your vault to the cloud"
     rescue ApiClient::ApiError => e
       if e.status == 401
-        $stdout.puts "Invalid token. Check your token at: https://inventlist.com/settings"
+        $stdout.puts "Invalid token. Check your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
       else
         $stdout.puts "Error connecting to InventList: #{e.message}"
       end
@@ -609,7 +609,7 @@ module LocalVault
       desc: "Recipient: @handle, team:HANDLE, or crew:SLUG"
     def share(vault_name = nil)
       unless Config.token
-        abort_with "Not logged in. Run: localvault login YOUR_TOKEN\n  Get your token at: https://inventlist.com/settings"
+        abort_with "Not logged in. Run: localvault login YOUR_TOKEN\n  Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
         return
       end
 
@@ -652,7 +652,7 @@ module LocalVault
     desc "receive", "Fetch and import vaults shared with you"
     def receive
       unless Config.token
-        abort_with "Not logged in. Run: localvault login YOUR_TOKEN\n  Get your token at: https://inventlist.com/settings"
+        abort_with "Not logged in. Run: localvault login YOUR_TOKEN\n  Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
         return
       end
 
@@ -720,7 +720,7 @@ module LocalVault
     desc "revoke SHARE_ID", "Revoke a vault share (stops future access)"
     def revoke(share_id)
       unless Config.token
-        abort_with "Not logged in. Run: localvault login YOUR_TOKEN\n  Get your token at: https://inventlist.com/settings"
+        abort_with "Not logged in. Run: localvault login YOUR_TOKEN\n  Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
         return
       end
 

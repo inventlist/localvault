@@ -14,7 +14,7 @@ module LocalVault
         unless Config.token
           $stderr.puts "Error: Not logged in."
           $stderr.puts "\n  localvault login YOUR_TOKEN\n"
-          $stderr.puts "Get your token at: https://inventlist.com/settings"
+          $stderr.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
           return
         end
 
@@ -91,7 +91,7 @@ module LocalVault
           $stderr.puts
           $stderr.puts "  localvault login YOUR_TOKEN"
           $stderr.puts
-          $stderr.puts "Get your token at: https://inventlist.com/settings"
+          $stderr.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
           $stderr.puts "New to InventList? Sign up free at https://inventlist.com"
           $stderr.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
           return
@@ -138,7 +138,7 @@ module LocalVault
         unless Config.token
           $stderr.puts "Error: Not logged in."
           $stderr.puts "\n  localvault login YOUR_TOKEN\n"
-          $stderr.puts "Get your token at: https://inventlist.com/settings"
+          $stderr.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
           return
         end
 
@@ -176,7 +176,7 @@ module LocalVault
         unless Config.token
           $stderr.puts "Error: Not logged in."
           $stderr.puts "\n  localvault login YOUR_TOKEN\n"
-          $stderr.puts "Get your token at: https://inventlist.com/settings"
+          $stderr.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
           return
         end
 
@@ -306,7 +306,7 @@ module LocalVault
           $stderr.puts
           $stderr.puts "  localvault login YOUR_TOKEN"
           $stderr.puts
-          $stderr.puts "Get your token at: https://inventlist.com/settings"
+          $stderr.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
           $stderr.puts "New to InventList? Sign up free at https://inventlist.com"
           $stderr.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
           return
