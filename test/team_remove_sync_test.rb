@@ -209,9 +209,14 @@ class TeamRemoveSyncTest < Minitest::Test
   end
 
   def run_team_remove_rotate(handle, vault_name)
+    # Stub passphrase prompt to return "newpass"
+    original = LocalVault::CLI::Team.instance_method(:prompt_passphrase)
+    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase) { |_msg = ""| "newpass" }
     LocalVault::ApiClient.stub(:new, @fake_client) do
       capture_io { LocalVault::CLI.start(["team", "remove", handle, "--vault", vault_name, "--rotate"]) }
     end
+  ensure
+    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase, original)
   end
 
   def last_pushed_blob

@@ -258,6 +258,7 @@ module LocalVault
       desc "remove HANDLE", "Remove a person's access to a vault"
       method_option :vault, type: :string, aliases: "-v"
       method_option :rotate, type: :boolean, default: false, desc: "Re-encrypt vault with new master key (full revocation)"
+      method_option :scope, type: :array, desc: "Remove specific scopes only (keeps other scopes)"
       # Remove a user's access to a vault.
       #
       # Removes the user's key slot and pushes the updated bundle. With +--rotate+,
@@ -283,7 +284,7 @@ module LocalVault
         # Try sync-based key slot removal first
         key_slots = load_key_slots(client, vault_name)
         if key_slots && !key_slots.empty?
-          remove_key_slot(handle, vault_name, key_slots, client, rotate: options[:rotate])
+          remove_key_slot(handle, vault_name, key_slots, client, rotate: options[:rotate], remove_scopes: options[:scope])
           return
         end
 
@@ -304,7 +305,80 @@ module LocalVault
         $stderr.puts "Error: #{e.message}"
       end
 
+      desc "rotate", "Re-encrypt a team vault with a new master key (no member changes)"
+      method_option :vault, type: :string, aliases: "-v"
+      # Re-key a team vault without adding or removing members.
+      #
+      # Prompts for a new passphrase, re-encrypts all secrets, and rebuilds
+      # all key slots. Useful for periodic key rotation.
+      def rotate
+        unless Config.token
+          $stderr.puts "Error: Not logged in."
+          return
+        end
+
+        vault_name = options[:vault] || Config.default_vault
+        client = ApiClient.new(token: Config.token)
+
+        key_slots = load_key_slots(client, vault_name)
+        unless key_slots && !key_slots.empty?
+          $stderr.puts "Error: Vault '#{vault_name}' has no team access. Nothing to rotate."
+          return
+        end
+
+        master_key = SessionCache.get(vault_name)
+        unless master_key
+          $stderr.puts "Error: Vault '#{vault_name}' is not unlocked."
+          return
+        end
+
+        passphrase = prompt_passphrase("New passphrase for vault '#{vault_name}': ")
+        if passphrase.nil? || passphrase.empty?
+          $stderr.puts "Error: Passphrase cannot be empty."
+          return
+        end
+
+        vault = Vault.new(name: vault_name, master_key: master_key)
+        secrets = vault.all
+        store = Store.new(vault_name)
+
+        new_salt = Crypto.generate_salt
+        new_master_key = Crypto.derive_master_key(passphrase, new_salt)
+
+        store.write_encrypted(Crypto.encrypt(JSON.generate(secrets), new_master_key))
+        store.create_meta!(salt: new_salt)
+
+        new_slots = {}
+        key_slots.each do |h, slot|
+          next unless slot.is_a?(Hash) && slot["pub"].is_a?(String)
+          if slot["scopes"].is_a?(Array)
+            filtered = vault.filter(slot["scopes"])
+            member_key = RbNaCl::Random.random_bytes(32)
+            encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)
+            new_slots[h] = { "pub" => slot["pub"], "enc_key" => KeySlot.create(member_key, slot["pub"]), "scopes" => slot["scopes"], "blob" => Base64.strict_encode64(encrypted_blob) }
+          else
+            new_slots[h] = { "pub" => slot["pub"], "enc_key" => KeySlot.create(new_master_key, slot["pub"]), "scopes" => nil, "blob" => nil }
+          end
+        end
+
+        blob = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: new_slots)
+        client.push_vault(vault_name, blob)
+        SessionCache.set(vault_name, new_master_key)
+
+        $stdout.puts "Vault '#{vault_name}' re-encrypted with new master key."
+        $stdout.puts "#{new_slots.size} member(s) updated."
+      rescue ApiClient::ApiError => e
+        $stderr.puts "Error: #{e.message}"
+      end
+
       private
+
+      def prompt_passphrase(msg = "Passphrase: ")
+        IO.console&.getpass(msg) || $stdin.gets&.chomp || ""
+      rescue Interrupt
+        $stderr.puts
+        ""
+      end
 
       def load_key_slots(client, vault_name)
         return nil unless client.respond_to?(:pull_vault)
@@ -317,12 +391,46 @@ module LocalVault
         nil
       end
 
-      def remove_key_slot(handle, vault_name, key_slots, client, rotate: false)
+      def remove_key_slot(handle, vault_name, key_slots, client, rotate: false, remove_scopes: nil)
         unless key_slots.key?(handle)
           $stderr.puts "Error: @#{handle} has no slot in vault '#{vault_name}'."
           return
         end
 
+        store = Store.new(vault_name)
+
+        # Partial scope removal
+        if remove_scopes && key_slots[handle].is_a?(Hash) && key_slots[handle]["scopes"].is_a?(Array)
+          remaining = key_slots[handle]["scopes"] - remove_scopes
+          if remaining.empty?
+            # Last scope removed — remove member entirely
+            key_slots.delete(handle)
+            $stdout.puts "Removed @#{handle} from vault '#{vault_name}' (last scope removed)."
+          else
+            # Rebuild blob with remaining scopes
+            master_key = SessionCache.get(vault_name)
+            if master_key
+              vault = Vault.new(name: vault_name, master_key: master_key)
+              filtered = vault.filter(remaining)
+              member_key = RbNaCl::Random.random_bytes(32)
+              encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)
+              enc_key = KeySlot.create(member_key, key_slots[handle]["pub"])
+              key_slots[handle] = {
+                "pub" => key_slots[handle]["pub"],
+                "enc_key" => enc_key,
+                "scopes" => remaining,
+                "blob" => Base64.strict_encode64(encrypted_blob)
+              }
+            end
+            $stdout.puts "Removed scope(s) #{remove_scopes.join(", ")} from @#{handle}. Remaining: #{remaining.join(", ")}"
+          end
+
+          blob = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: key_slots)
+          client.push_vault(vault_name, blob)
+          return
+        end
+
+        # Full member removal
         valid_slots = key_slots.select { |_, v| v.is_a?(Hash) && v["pub"].is_a?(String) }
         if handle == Config.inventlist_handle && valid_slots.size <= 1
           $stderr.puts "Error: Cannot remove yourself — you are the only member."
@@ -330,7 +438,6 @@ module LocalVault
         end
 
         key_slots.delete(handle)
-        store = Store.new(vault_name)
 
         if rotate
           master_key = SessionCache.get(vault_name)
@@ -339,30 +446,47 @@ module LocalVault
             return
           end
 
-          # Decrypt current secrets, generate new master key, re-encrypt
+          # Prompt for new passphrase
+          passphrase = prompt_passphrase("New passphrase for vault '#{vault_name}': ")
+          if passphrase.nil? || passphrase.empty?
+            $stderr.puts "Error: Passphrase cannot be empty."
+            return
+          end
+
           vault = Vault.new(name: vault_name, master_key: master_key)
           secrets = vault.all
 
           new_salt = Crypto.generate_salt
-          new_master_key = Crypto.derive_master_key(SecureRandom.hex(32), new_salt)
+          new_master_key = Crypto.derive_master_key(passphrase, new_salt)
 
-          # Re-encrypt secrets with new master key
           new_json = JSON.generate(secrets)
           new_encrypted = Crypto.encrypt(new_json, new_master_key)
           store.write_encrypted(new_encrypted)
           store.create_meta!(salt: new_salt)
 
-          # Re-create key slots for remaining members with new master key
           new_slots = {}
           key_slots.each do |h, slot|
             next unless slot.is_a?(Hash) && slot["pub"].is_a?(String)
-            new_slots[h] = { "pub" => slot["pub"], "enc_key" => KeySlot.create(new_master_key, slot["pub"]) }
+            if slot["scopes"].is_a?(Array)
+              # Scoped member — rebuild per-member blob
+              filtered = vault.filter(slot["scopes"])
+              member_key = RbNaCl::Random.random_bytes(32)
+              encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)
+              new_slots[h] = {
+                "pub" => slot["pub"],
+                "enc_key" => KeySlot.create(member_key, slot["pub"]),
+                "scopes" => slot["scopes"],
+                "blob" => Base64.strict_encode64(encrypted_blob)
+              }
+            else
+              # Full-access member
+              new_slots[h] = { "pub" => slot["pub"], "enc_key" => KeySlot.create(new_master_key, slot["pub"]), "scopes" => nil, "blob" => nil }
+            end
           end
 
           blob = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: new_slots)
           client.push_vault(vault_name, blob)
 
-          # Only cache new master key if the caller is still a member
           if new_slots.key?(Config.inventlist_handle)
             SessionCache.set(vault_name, new_master_key)
           else
@@ -371,8 +495,6 @@ module LocalVault
 
           $stdout.puts "Removed @#{handle} from vault '#{vault_name}'."
           $stdout.puts "Vault re-encrypted with new master key (rotated)."
-          $stderr.puts "Note: This vault is now key-slot-only. Passphrase-based access will not work."
-          $stderr.puts "Authorized members: #{new_slots.keys.map { |h| "@#{h}" }.join(", ")}"
         else
           blob = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: key_slots)
           client.push_vault(vault_name, blob)
