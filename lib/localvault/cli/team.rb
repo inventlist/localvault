@@ -421,6 +421,8 @@ module LocalVault
         nil
       end
 
+      # Remove a member's key slot, optionally rotating the vault master key.
+      # Supports partial scope removal via remove_scopes.
       def remove_key_slot(handle, vault_name, key_slots, client, rotate: false, remove_scopes: nil, owner: nil)
         owner ||= Config.inventlist_handle
         unless key_slots.key?(handle)
