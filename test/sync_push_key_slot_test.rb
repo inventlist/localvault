@@ -110,7 +110,7 @@ class SyncPushKeySlotTest < Minitest::Test
     # Remote has key_slots as a string instead of hash
     store = LocalVault::Store.new("default")
     bad_blob = JSON.generate({
-      "version" => 2,
+      "version" => 3, "owner" => "nauman",
       "meta" => Base64.strict_encode64(File.read(store.meta_path)),
       "secrets" => Base64.strict_encode64(store.read_encrypted || ""),
       "key_slots" => "oops"
@@ -129,7 +129,7 @@ class SyncPushKeySlotTest < Minitest::Test
 
     store = LocalVault::Store.new("default")
     bad_blob = JSON.generate({
-      "version" => 2,
+      "version" => 3, "owner" => "nauman",
       "meta" => Base64.strict_encode64(File.read(store.meta_path)),
       "secrets" => Base64.strict_encode64(store.read_encrypted || ""),
       "key_slots" => [1, 2, 3]
@@ -144,14 +144,15 @@ class SyncPushKeySlotTest < Minitest::Test
 
   # ── Push without identity — no key slots ──
 
-  def test_push_without_identity_has_no_key_slots
-    # No identity set up — no keygen, no login
+  def test_push_without_identity_writes_v1_personal
+    # No identity set up — personal vault, v1 format
     LocalVault::Config.token = "tok"
 
     push_and_capture("default")
 
-    slots = JSON.parse(last_pushed_blob)["key_slots"]
-    assert_equal({}, slots, "Push without identity should have empty key slots")
+    data = JSON.parse(last_pushed_blob)
+    assert_equal 1, data["version"]
+    refute data.key?("key_slots"), "Personal push should have no key_slots"
   end
 
   def test_push_without_login_has_no_key_slots
@@ -175,10 +176,13 @@ class SyncPushKeySlotTest < Minitest::Test
     LocalVault::Identity.generate!
     LocalVault::Config.token = "tok"
     LocalVault::Config.inventlist_handle = "nauman"
-    # Cache master key so bootstrap_owner_slot can encrypt
     store = LocalVault::Store.new("default")
     master_key = LocalVault::Crypto.derive_master_key(@passphrase, store.salt)
     LocalVault::SessionCache.set("default", master_key)
+
+    # Set up a v3 remote so push recognizes it as a team vault
+    v3_remote = LocalVault::SyncBundle.pack_v3(store, owner: "nauman", key_slots: {})
+    @fake_client.set_response(:pull_vault, v3_remote)
   end
 
   def create_test_vault(name, passphrase)

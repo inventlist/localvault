@@ -22,10 +22,36 @@ module LocalVault
           return
         end
 
-        key_slots = load_existing_key_slots(vault_name)
-        key_slots = bootstrap_owner_slot(key_slots, store)
+        # Load remote state to determine vault mode
+        remote_data = load_remote_bundle_data(vault_name)
+        handle = Config.inventlist_handle
 
-        blob   = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: key_slots)
+        if remote_data && remote_data[:owner]
+          # Team vault — check push authorization
+          owner = remote_data[:owner]
+          key_slots = remote_data[:key_slots] || {}
+          has_scoped = key_slots.values.any? { |s| s.is_a?(Hash) && s["scopes"].is_a?(Array) }
+          my_slot = key_slots[handle]
+          am_scoped = my_slot.is_a?(Hash) && my_slot["scopes"].is_a?(Array)
+
+          if am_scoped
+            $stderr.puts "Error: You have scoped access to vault '#{vault_name}'. Only the owner (@#{owner}) can push."
+            return
+          end
+
+          if has_scoped && owner != handle
+            $stderr.puts "Error: Vault '#{vault_name}' has scoped members. Only the owner (@#{owner}) can push."
+            return
+          end
+
+          # Authorized — push as v3, preserve key_slots
+          key_slots = bootstrap_owner_slot(key_slots, store)
+          blob = SyncBundle.pack_v3(store, owner: owner, key_slots: key_slots)
+        else
+          # Personal vault — push as v1
+          blob = SyncBundle.pack(store)
+        end
+
         client = ApiClient.new(token: Config.token)
         client.push_vault(vault_name, blob)
 
@@ -185,6 +211,17 @@ module LocalVault
         $stderr.puts "New to InventList? Sign up free at https://inventlist.com"
         $stderr.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
         false
+      end
+
+      # Load the full unpacked remote bundle data (owner, key_slots, etc).
+      # Returns nil if no remote blob exists.
+      def load_remote_bundle_data(vault_name)
+        client = ApiClient.new(token: Config.token)
+        blob = client.pull_vault(vault_name)
+        return nil unless blob.is_a?(String) && !blob.empty?
+        SyncBundle.unpack(blob)
+      rescue ApiClient::ApiError, SyncBundle::UnpackError
+        nil
       end
 
       # Load key_slots from the last pushed blob (if any).
