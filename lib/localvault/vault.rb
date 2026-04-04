@@ -310,6 +310,26 @@ module LocalVault
       write_secrets(secrets)
     end
 
+    # Return a subset of secrets matching the given scopes.
+    #
+    # Scopes can be group names (returns entire nested hash) or flat key names.
+    # +nil+ means full access (returns all). Empty array means nothing.
+    #
+    # @param scopes [Array<String>, nil] list of group/key names, or nil for all
+    # @return [Hash] filtered secrets
+    def filter(scopes)
+      return all if scopes.nil?
+      return {} if scopes.empty?
+
+      secrets = all
+      result = {}
+      scopes.each do |scope|
+        value = secrets[scope]
+        result[scope] = value if value
+      end
+      result
+    end
+
     private
 
     def shell_safe_key?(key)
