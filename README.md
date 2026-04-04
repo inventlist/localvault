@@ -1,14 +1,16 @@
 # LocalVault
 
-Zero-infrastructure secrets manager. Encrypted secrets stored locally, unlocked with a passphrase.
+Encrypted local secrets vault with MCP server for AI agents. Zero infrastructure, zero cloud dependency.
 
-No servers. No cloud. No config files to leak. Just encrypted files on disk.
+> **[Try the interactive demo](https://inventlist.com/tools/localvault/cli)** — explore every command in your browser.
 
 Part of [InventList Tools](https://inventlist.com/tools/localvault) — free, open-source developer utilities for indie builders.
 
+---
+
 ## Install
 
-### Homebrew (macOS)
+### Homebrew (macOS / Linux)
 
 ```bash
 brew install inventlist/tap/localvault
@@ -39,206 +41,221 @@ sudo dnf install libsodium-devel
 # Create a vault (prompts for passphrase)
 localvault init
 
-# Store any sensitive values — API keys, tokens, credentials, database URLs
+# Store secrets
 localvault set OPENAI_API_KEY "sk-proj-..."
 localvault set STRIPE_SECRET_KEY "sk_live_..."
-localvault set GITHUB_TOKEN "ghp_..."
+localvault set DATABASE_URL "postgres://localhost/myapp"
 
-# Retrieve a secret (pipeable)
+# Retrieve a secret (raw, pipeable)
 localvault get OPENAI_API_KEY
 
-# List all keys
-localvault list
+# View all secrets (masked by default)
+localvault show
+
+# Reveal values
+localvault show --reveal
 
 # Export as shell variables
-localvault env
-# => export GITHUB_TOKEN="ghp_..."
-# => export OPENAI_API_KEY="sk-proj-..."
-# => export STRIPE_SECRET_KEY="sk_live_..."
+eval $(localvault env)
 
 # Run a command with secrets injected
 localvault exec -- rails server
-localvault exec -- node app.js
 ```
 
 ## Commands
 
+### Secrets
+
 | Command | Description |
 |---------|-------------|
-| `init [NAME]` | Create a vault (prompts for passphrase with confirmation) |
-| `set KEY VALUE` | Store a secret |
-| `get KEY` | Retrieve a secret (raw value, pipeable) |
-| `list` | List all keys |
+| `init [NAME]` | Create a vault (Argon2id key derivation) |
+| `set KEY VALUE` | Store a secret (supports dot-notation: `project.KEY`) |
+| `get KEY` | Retrieve a secret (raw, pipeable) |
+| `show` | Display all secrets in a table (masked by default) |
+| `show --reveal` | Display with values visible |
+| `show --group` | Group by dot-notation prefix (one table per project) |
+| `list` | List key names only |
 | `delete KEY` | Remove a secret |
-| `env` | Export all secrets as `export KEY="value"` lines |
-| `exec -- CMD` | Run a command with all secrets as env vars |
-| `vaults` | List all vaults |
-| `unlock` | Output a session token for passphrase-free access |
-| `reset [NAME]` | Destroy all secrets and reinitialize with a new passphrase |
-| `login TOKEN` | Log in to InventList (auto-keygen + publish public key) |
-| `sync push` | Push vault to InventList cloud |
-| `sync pull` | Pull vault from InventList cloud |
-| `sync status` | Show sync state for all vaults |
-| `team init` | Initialize a vault as a team vault (sets you as owner) |
-| `team add @handle` | Add a teammate (with optional `--scope`) |
-| `team remove @handle` | Remove a teammate (with optional `--rotate` or `--scope`) |
-| `team list` | Show who has access to a synced vault |
-| `team rotate` | Re-encrypt vault with new passphrase (no member changes) |
-| `version` | Print version |
+| `rename OLD NEW` | Rename a secret key |
+| `copy KEY --to VAULT` | Copy a secret to another vault |
+| `import FILE` | Bulk-import from .env / .json / .yml |
+| `env` | Export as `export KEY="value"` lines |
+| `exec -- CMD` | Run a command with secrets injected as env vars |
 
-All vault commands accept `--vault NAME` (or `-v NAME`) to target a specific vault. Defaults to `default`.
+### Vault Management
+
+| Command | Description |
+|---------|-------------|
+| `vaults` | List all vaults with secret counts |
+| `switch [VAULT]` | Switch default vault |
+| `unlock` | Cache passphrase for the session |
+| `lock [NAME]` | Clear cached passphrase |
+| `rekey [NAME]` | Change vault passphrase (re-encrypts all secrets) |
+| `reset [NAME]` | Destroy and reinitialize a vault |
+
+### Sync & Login
+
+| Command | Description |
+|---------|-------------|
+| `login [TOKEN]` | Log in to InventList — auto-generates X25519 keypair + publishes public key |
+| `login --status` | Show current login status |
+| `logout` | Clear stored credentials |
+| `sync push [NAME]` | Push encrypted vault to cloud |
+| `sync pull [NAME]` | Pull vault from cloud (auto-unlocks if you have a key slot) |
+| `sync status` | Show sync state for all vaults |
+| `config set server URL` | Point at a custom server (default: inventlist.com) |
+
+### Team Sharing (v1.2.0)
+
+| Command | Description |
+|---------|-------------|
+| `team init` | Convert vault to team vault (sets you as owner, SyncBundle v3) |
+| `team verify @handle` | Check if a user has a published public key (dry-run) |
+| `team add @handle` | Add teammate with full vault access |
+| `team add @handle --scope KEY...` | Add teammate with access to specific keys only |
+| `team remove @handle` | Remove teammate's access |
+| `team remove @handle --scope KEY` | Remove one scoped key (keeps other scopes) |
+| `team remove @handle --rotate` | Full revocation + re-encrypt with new passphrase |
+| `team list` | List vault members |
+| `team rotate` | Re-key vault with new passphrase, keep all members |
+
+### Keys
+
+| Command | Description |
+|---------|-------------|
+| `keys generate` | Generate X25519 identity keypair |
+| `keys show` | Display your public key |
+| `keys publish` | Upload public key to InventList (required before others can add you) |
+
+### AI / MCP
+
+| Command | Description |
+|---------|-------------|
+| `install-mcp [CLIENT]` | Configure MCP server in claude-code, cursor, windsurf, or zed |
+| `mcp` | Start MCP server (stdio transport) |
+
+All commands accept `--vault NAME` (or `-v NAME`) to target a specific vault. Default vault is `default`.
+
+## Personal Sync
+
+Sync your vaults between machines — same passphrase, no team features needed:
+
+```bash
+# Machine A: push your vault
+localvault sync push
+
+# Machine B: install, login, pull
+brew install inventlist/tap/localvault
+localvault login YOUR_TOKEN
+localvault sync pull
+localvault show  # enter your passphrase — same secrets
+```
+
+Check what's synced:
+
+```bash
+localvault sync status
+# default        synced        2 minutes ago
+# production     local only    —
+```
+
+## Team Sharing
+
+Share vault access with teammates using X25519 asymmetric encryption. The server never sees plaintext.
+
+```bash
+# 1. Convert to team vault (required first)
+localvault team init -v production
+
+# 2. Verify teammate has a published key
+localvault team verify @alice
+
+# 3. Add with full access
+localvault team add @alice -v production
+
+# 4. Or scoped — they only see specific keys
+localvault team add @bob -v production --scope STRIPE_KEY WEBHOOK_SECRET
+
+# 5. When Alice pulls, auto-unlocks via her identity key
+# (on Alice's machine)
+localvault sync pull production
+# => Unlocked via your identity key.
+
+# 6. Scoped members can't push
+# (on Bob's machine)
+localvault sync push production
+# => Error: You have scoped access. Only the owner can push.
+
+# 7. Rotate without removing anyone
+localvault team rotate -v production
+
+# 8. Full revocation + re-key
+localvault team remove @alice -v production --rotate
+```
+
+**Prerequisites:** Teammates must have a published public key. `localvault login` does this automatically, or: `localvault keys generate && localvault keys publish`.
+
+## MCP Server (AI Agents)
+
+Give AI agents safe secret access. Keys never appear in agent context or config files.
+
+```bash
+# One-command install for Claude Code
+localvault install-mcp claude-code
+# Also supports: cursor, windsurf, zed
+
+# Unlock your vault for the session
+localvault unlock
+
+# MCP tools available to the agent:
+#   get_secret(key, vault?)      — read a secret
+#   list_secrets(vault?, prefix?) — list key names
+#   set_secret(key, value, vault?) — store a secret
+#   delete_secret(key, vault?)   — remove a secret
+```
+
+**exec_action** — agent declares intent, LocalVault executes with secrets injected. The agent never sees the key:
+
+```bash
+localvault exec_action -- curl -s https://api.openai.com/v1/models \
+  -H "Authorization: Bearer $OPENAI_API_KEY"
+```
+
+## Multi-Project Vaults
+
+One vault, many projects. Dot-notation keeps secrets organized:
+
+```bash
+# Store with project prefix
+localvault set myapp.DATABASE_URL postgres://localhost/myapp -v work
+localvault set api.DATABASE_URL postgres://localhost/api -v work
+
+# View grouped by project
+localvault show --group -v work
+
+# Filter to one project
+localvault show -p myapp -v work
+
+# Export one project
+eval $(localvault env -p myapp -v work)
+
+# Bulk import
+localvault import .env --prefix myapp -v work
+```
 
 ## Session Caching
 
 Avoid typing your passphrase repeatedly:
 
 ```bash
-# Unlock once per terminal session
 eval $(localvault unlock)
 
 # All subsequent commands skip the passphrase prompt
 localvault get API_KEY
-localvault list
 localvault exec -- rails server
 ```
 
-The session token is stored in `LOCALVAULT_SESSION` and contains the derived master key (base64-encoded). It lives only in your shell's memory and disappears when the terminal closes.
-
-## Multiple Vaults
-
-Separate secrets by project, environment, or service — each vault has its own passphrase and encryption:
-
-```bash
-# Create separate vaults
-localvault init production
-localvault init staging
-localvault init x          # all X / Twitter API credentials
-
-# Use --vault to target a specific vault
-localvault set API_KEY "sk-prod-xxx" --vault production
-localvault set API_KEY "sk-staging-xxx" --vault staging
-
-# Store multiple X accounts in one vault using handle-prefixed keys
-localvault set MYHANDLE_API_KEY        "..." --vault x
-localvault set MYHANDLE_API_SECRET     "..." --vault x
-localvault set MYHANDLE_ACCESS_TOKEN   "..." --vault x
-localvault set MYHANDLE_ACCESS_SECRET  "..." --vault x
-localvault set MYHANDLE_BEARER_TOKEN   "..." --vault x
-
-localvault set MYBRAND_API_KEY         "..." --vault x
-localvault set MYBRAND_ACCESS_TOKEN    "..." --vault x
-
-# List all vaults
-localvault vaults
-# => default (default)
-# => production
-# => staging
-# => x
-
-# Unlock a specific vault for a session
-eval $(localvault unlock --vault x)
-localvault exec --vault x -- ruby scripts/post.rb
-```
-
-## Resetting a Vault
-
-Forgot your passphrase? Use `reset` to destroy all secrets and start fresh with a new one:
-
-```bash
-localvault reset
-# WARNING: This will permanently delete all secrets in vault 'default'.
-# This cannot be undone.
-# Type 'default' to confirm: default
-# New passphrase:
-# Confirm passphrase:
-# Vault 'default' has been reset.
-```
-
-Works on named vaults too: `localvault reset production`. All secrets are gone — there is no recovery.
-
-## Cloud Sync
-
-Sync vaults across devices via [InventList](https://inventlist.com). Your secrets stay encrypted — the server never sees plaintext.
-
-```bash
-# Log in (auto-generates keypair + publishes public key)
-localvault login YOUR_TOKEN
-
-# Push a vault to the cloud
-localvault sync push
-
-# Pull on another device
-localvault sync pull
-
-# Check sync status
-localvault sync status
-```
-
-## Team Sharing
-
-Share vault access with teammates using X25519 key slots. Three modes: personal sync (just you), direct share (one-time handoff), and team sync (ongoing shared access with scoping).
-
-```bash
-# Initialize a vault as a team vault (you become the owner)
-localvault team init -v production
-
-# Add a teammate with full access
-localvault team add @bob -v production
-
-# Add a teammate with scoped access (only specific keys)
-localvault team add @carol -v production --scope platepose DATABASE_URL
-
-# See who has access
-localvault team list -v production
-# => @alice  (owner)
-# => @bob    (full vault)
-# => @carol  (scopes: platepose, DATABASE_URL)
-
-# Remove access
-localvault team remove @bob -v production
-
-# Remove a specific scope (keeps other scopes)
-localvault team remove @carol -v production --scope DATABASE_URL
-
-# Remove + re-encrypt with new passphrase (full revocation)
-localvault team remove @bob -v production --rotate
-
-# Re-key without removing anyone (periodic rotation)
-localvault team rotate -v production
-```
-
-When a teammate pulls a vault they have a key slot for, it auto-unlocks via their identity key. Scoped members see only their authorized keys — they don't know other keys exist.
-
-## MCP Server (AI Agents)
-
-LocalVault includes an MCP server so AI coding agents can read and manage secrets via the Model Context Protocol — without ever seeing your passphrase.
-
-```bash
-# Unlock your vault first
-eval $(localvault unlock)
-```
-
-Then add to your MCP config (`.mcp.json`, `.cursor/mcp.json`, etc.):
-
-```json
-{
-  "mcpServers": {
-    "localvault": {
-      "command": "localvault",
-      "args": ["mcp"],
-      "env": {
-        "LOCALVAULT_SESSION": "<your-session-token>"
-      }
-    }
-  }
-}
-```
-
-If you've already run `eval $(localvault unlock)` in your terminal, the agent inherits the session automatically — no need to paste the token.
-
-**Available tools:** `get_secret`, `list_secrets`, `set_secret`, `delete_secret`
-
-See [MCP for AI Agents](https://inventlist.com/sites/localvault/series/localvault/mcp-for-ai-agents) for Claude Code and Cursor configuration details.
+Session lives in `LOCALVAULT_SESSION` — disappears when the terminal closes.
 
 ## Security
 
@@ -246,20 +263,23 @@ See [MCP for AI Agents](https://inventlist.com/sites/localvault/series/localvaul
 
 | Layer | Algorithm | Purpose |
 |-------|-----------|---------|
-| Key derivation | **Argon2id** (64 MB, 2 iterations) | Passphrase to master key |
-| Encryption | **XSalsa20-Poly1305** | Authenticated encryption of secrets |
+| Key derivation | **Argon2id** (64 MB, 3 iterations) | Passphrase → master key |
+| Encryption | **XSalsa20-Poly1305** | Authenticated encryption |
 | Key exchange | **X25519** | Team key slots + vault sharing |
 
-- Every encryption uses a random 24-byte nonce
-- Authentication tag prevents tampering (Poly1305)
-- Argon2id is memory-hard, resistant to GPU/ASIC attacks
+- Random 24-byte nonce per encryption
+- Poly1305 authentication prevents tampering
+- Argon2id is memory-hard (GPU/ASIC resistant)
 - All crypto via [libsodium](https://doc.libsodium.org/) (RbNaCl bindings)
+- SyncBundle v3 for team vaults (owner field + per-member key slots)
 
 ### Storage Layout
 
 ```
 ~/.localvault/
-├── config.yml              # Default vault name
+├── config.yml              # Default vault, server URL, token
+├── identity.key            # X25519 private key (encrypted at rest)
+├── identity.pub            # X25519 public key (safe to share)
 ├── vaults/
 │   ├── default/
 │   │   ├── meta.yml        # Salt, creation date, version
@@ -267,13 +287,19 @@ See [MCP for AI Agents](https://inventlist.com/sites/localvault/series/localvaul
 │   └── production/
 │       ├── meta.yml
 │       └── secrets.enc
-└── keys/                   # X25519 identity keypair for sync + team access
 ```
 
-- Secrets are stored as a single encrypted JSON blob per vault
-- Atomic writes (temp file + rename) prevent corruption
-- Salt is stored in plaintext metadata (this is standard and safe)
-- The master key is never written to disk
+## Server Independence
+
+LocalVault is server-agnostic. It ships configured for `inventlist.com` but works with any host that implements the protocol (4 endpoints):
+
+```bash
+# Use a different server
+localvault config set server https://vaulthost.example
+
+# Or override per-login
+localvault login --server https://vaulthost.example
+```
 
 ## Development
 
@@ -281,7 +307,7 @@ See [MCP for AI Agents](https://inventlist.com/sites/localvault/series/localvaul
 git clone https://github.com/inventlist/localvault.git
 cd localvault
 bundle install
-bundle exec rake test
+bundle exec rake test  # 463 tests, 918 assertions
 ```
 
 ## Used by
@@ -290,4 +316,5 @@ Powers credentials management at [InventList](https://inventlist.com) — where 
 
 ## License
 
-MIT
+Apache 2.0 — see [LICENSE](LICENSE).
+Built by the [InventList](https://inventlist.com) team.
