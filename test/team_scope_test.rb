@@ -160,3 +160,69 @@ class FakeScopeClient
   def method_missing(name, *args, **kw) = @calls << { method: name, args: args, kwargs: kw }
   def respond_to_missing?(name, _) = name != :call
 end
+
+class TeamVerifyTest < Minitest::Test
+  include LocalVault::TestHelper
+
+  def setup
+    setup_test_home
+    LocalVault::Config.ensure_directories!
+    LocalVault::Config.token = "tok"
+    @fake_client = FakeVerifyClient.new
+  end
+
+  def teardown
+    teardown_test_home
+  end
+
+  def test_verify_shows_public_key_info
+    @fake_client.set_response({ "handle" => "bob", "public_key" => "abcdefghijklmnop" })
+
+    out, = LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["team", "verify", "@bob"]) }
+    end
+
+    assert_match(/@bob.*public key published/i, out)
+    assert_match(/fingerprint/i, out)
+    assert_match(/team add @bob/i, out)
+  end
+
+  def test_verify_shows_no_key_warning
+    @fake_client.set_response({ "handle" => "bob", "public_key" => nil })
+
+    _, err = LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["team", "verify", "@bob"]) }
+    end
+
+    assert_match(/no public key/i, err)
+    assert_match(/localvault login/i, err)
+  end
+
+  def test_verify_shows_not_found
+    @fake_client.set_error(404)
+
+    _, err = LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["team", "verify", "@nobody"]) }
+    end
+
+    assert_match(/not found/i, err)
+  end
+
+  def test_verify_requires_login
+    LocalVault::Config.token = nil
+
+    _, err = capture_io { LocalVault::CLI.start(["team", "verify", "@bob"]) }
+
+    assert_match(/not logged in/i, err)
+  end
+end
+
+class FakeVerifyClient
+  def initialize; @response = {}; @error = nil; end
+  def set_response(r) = @response = r
+  def set_error(status) = @error = status
+  def get_public_key(_handle)
+    raise LocalVault::ApiClient::ApiError.new("Not found", status: @error) if @error
+    @response
+  end
+end
