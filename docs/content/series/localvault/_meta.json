@@ -14,6 +14,9 @@
     { "id": "07", "file": "07-security-model.md", "type": "doc" },
     { "id": "08", "file": "08-cli-reference.md", "type": "doc" },
     { "id": "09", "file": "09-team-sync-and-key-slots.md", "type": "doc" },
-    { "id": "10", "file": "10-mcp-config-leaking-secrets.md", "type": "journey" }
+    { "id": "10", "file": "10-mcp-config-leaking-secrets.md", "type": "journey" },
+    { "id": "11", "file": "11-team-init-and-scoped-sharing.md", "type": "doc" },
+    { "id": "12", "file": "12-rotation-revocation-and-push-auth.md", "type": "doc" },
+    { "id": "13", "file": "13-personal-sync.md", "type": "doc" }
   ]
 }
