@@ -4,6 +4,80 @@ require "securerandom"
 module LocalVault
   class CLI
     class Team < Thor
+      desc "init", "Initialize a vault as a team vault (sets you as owner)"
+      method_option :vault, type: :string, aliases: "-v"
+      # Initialize a vault as a team vault with you as the owner.
+      #
+      # This is the explicit transition from personal sync to team-shared sync.
+      # Creates the owner's key slot and bumps the bundle to v3.
+      def init
+        unless Config.token
+          $stderr.puts "Error: Not logged in."
+          $stderr.puts "\n  localvault login YOUR_TOKEN\n"
+          $stderr.puts "Get your token at: https://inventlist.com/settings"
+          return
+        end
+
+        unless Identity.exists?
+          $stderr.puts "Error: No keypair found. Run: localvault keygen"
+          return
+        end
+
+        vault_name = options[:vault] || Config.default_vault
+        handle = Config.inventlist_handle
+
+        master_key = SessionCache.get(vault_name)
+        unless master_key
+          $stderr.puts "Error: Vault '#{vault_name}' is not unlocked. Run: localvault show -v #{vault_name}"
+          return
+        end
+
+        client = ApiClient.new(token: Config.token)
+        begin
+          blob = client.pull_vault(vault_name)
+          unless blob.is_a?(String) && !blob.empty?
+            $stderr.puts "Error: Vault '#{vault_name}' has not been synced. Run: localvault sync push -v #{vault_name}"
+            return
+          end
+          data = SyncBundle.unpack(blob)
+          if data[:owner]
+            $stderr.puts "Error: Vault '#{vault_name}' is already a team vault. Owner: @#{data[:owner]}"
+            return
+          end
+        rescue ApiClient::ApiError => e
+          if e.status == 404
+            $stderr.puts "Error: Vault '#{vault_name}' has not been synced. Run: localvault sync push -v #{vault_name}"
+          else
+            $stderr.puts "Error: #{e.message}"
+          end
+          return
+        end
+
+        # Create owner key slot
+        pub_b64 = Identity.public_key
+        enc_key = KeySlot.create(master_key, pub_b64)
+        key_slots = {
+          handle => { "pub" => pub_b64, "enc_key" => enc_key, "scopes" => nil, "blob" => nil }
+        }
+
+        # Preserve existing key slots from v2 (upgrade path)
+        data[:key_slots].each do |h, slot|
+          next if h == handle
+          next unless slot.is_a?(Hash) && slot["pub"].is_a?(String)
+          key_slots[h] = slot.merge("scopes" => nil, "blob" => nil)
+        end
+
+        store = Store.new(vault_name)
+        new_blob = SyncBundle.pack_v3(store, owner: handle, key_slots: key_slots)
+        client.push_vault(vault_name, new_blob)
+
+        $stdout.puts "Vault '#{vault_name}' is now a team vault."
+        $stdout.puts "Owner: @#{handle}"
+        $stdout.puts "\nNext: localvault team add @handle -v #{vault_name}"
+      rescue SyncBundle::UnpackError => e
+        $stderr.puts "Error: #{e.message}"
+      end
+
       desc "list [VAULT]", "Show who has access to a vault"
       method_option :vault, type: :string, aliases: "-v"
       # List all users who have access to a vault.
