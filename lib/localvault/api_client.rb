@@ -27,39 +27,67 @@ module LocalVault
 
     BASE_PATH = "/api/v1"
 
+    # Create a new API client.
+    #
+    # @param token [String] Bearer token for authentication
+    # @param base_url [String, nil] API base URL (defaults to Config.api_url)
     def initialize(token:, base_url: nil)
       @token    = token
       @base_url = base_url || Config.api_url
     end
 
-    # GET /api/v1/me
+    # Fetch the authenticated user's profile.
+    #
+    # @return [Hash] user data (e.g. {"user" => {"handle" => "nauman"}})
+    # @raise [ApiError] on HTTP or network failure
     def me
       get("/me")
     end
 
-    # GET /api/v1/users/:handle/public_key
+    # Fetch a user's X25519 public key by handle.
+    #
+    # @param handle [String] the user's InventList handle
+    # @return [Hash] key data (e.g. {"public_key" => "base64..."})
+    # @raise [ApiError] on HTTP or network failure
     def get_public_key(handle)
       get("/users/#{URI.encode_uri_component(handle)}/public_key")
     end
 
-    # PUT /api/v1/profile/public_key
+    # Upload the current user's X25519 public key to InventList.
+    #
+    # @param public_key_b64 [String] base64-encoded X25519 public key
+    # @return [Hash] confirmation response
+    # @raise [ApiError] on HTTP or network failure
     def publish_public_key(public_key_b64)
       put("/profile/public_key", { public_key: public_key_b64 })
     end
 
-    # GET /api/v1/vault_shares/pending
+    # List vault shares pending acceptance by the current user.
+    #
+    # @return [Hash] shares data (e.g. {"shares" => [...]})
+    # @raise [ApiError] on HTTP or network failure
     def pending_shares
       get("/vault_shares/pending")
     end
 
-    # GET /api/v1/vault_shares/sent?vault_name=NAME
+    # List vault shares sent by the current user, optionally filtered by vault.
+    #
+    # @param vault_name [String, nil] filter by vault name (all shares if nil)
+    # @return [Hash] shares data (e.g. {"shares" => [...]})
+    # @raise [ApiError] on HTTP or network failure
     def sent_shares(vault_name: nil)
       path = "/vault_shares/sent"
       path += "?vault_name=#{URI.encode_uri_component(vault_name)}" if vault_name
       get(path)
     end
 
-    # POST /api/v1/vault_shares
+    # Create a new vault share for a recipient.
+    #
+    # @param vault_name [String] name of the vault being shared
+    # @param recipient_handle [String] InventList handle of the recipient
+    # @param encrypted_payload [String] base64-encoded encrypted secrets from ShareCrypto
+    # @return [Hash] created share data
+    # @raise [ApiError] on HTTP or network failure
     def create_share(vault_name:, recipient_handle:, encrypted_payload:)
       post("/vault_shares", {
         vault_name:        vault_name,
@@ -68,42 +96,74 @@ module LocalVault
       })
     end
 
-    # PATCH /api/v1/vault_shares/:id/accept
+    # Accept a pending vault share.
+    #
+    # @param id [Integer, String] the share ID to accept
+    # @return [Hash] updated share data
+    # @raise [ApiError] on HTTP or network failure
     def accept_share(id)
       patch("/vault_shares/#{URI.encode_uri_component(id.to_s)}/accept", {})
     end
 
-    # DELETE /api/v1/vault_shares/:id
+    # Revoke (delete) a vault share.
+    #
+    # @param id [Integer, String] the share ID to revoke
+    # @return [Hash] confirmation response
+    # @raise [ApiError] on HTTP or network failure
     def revoke_share(id)
       delete("/vault_shares/#{URI.encode_uri_component(id.to_s)}")
     end
 
-    # GET /api/v1/teams/:handle/members/public_keys
+    # Fetch public keys for all members of a team.
+    #
+    # @param team_handle [String] the team's InventList handle
+    # @return [Hash] member keys (e.g. {"members" => [{"handle" => "...", "public_key" => "..."}]})
+    # @raise [ApiError] on HTTP or network failure
     def team_public_keys(team_handle)
       get("/teams/#{URI.encode_uri_component(team_handle)}/members/public_keys")
     end
 
-    # GET /api/v1/sites/:slug/crew/public_keys
+    # Fetch public keys for all crew members of a site.
+    #
+    # @param site_slug [String] the site's slug
+    # @return [Hash] crew keys (e.g. {"members" => [{"handle" => "...", "public_key" => "..."}]})
+    # @raise [ApiError] on HTTP or network failure
     def crew_public_keys(site_slug)
       get("/sites/#{URI.encode_uri_component(site_slug)}/crew/public_keys")
     end
 
-    # GET /api/v1/vaults
+    # List all vaults stored in the cloud for the authenticated user.
+    #
+    # @return [Hash] vaults data (e.g. {"vaults" => [{"name" => "prod", ...}]})
+    # @raise [ApiError] on HTTP or network failure
     def list_vaults
       get("/vaults")
     end
 
-    # PUT /api/v1/vaults/:name — sends raw binary blob, returns JSON
+    # Upload a vault bundle to the cloud (raw binary).
+    #
+    # @param name [String] vault name
+    # @param blob [String] packed SyncBundle binary blob
+    # @return [Hash] confirmation with vault metadata
+    # @raise [ApiError] on HTTP or network failure
     def push_vault(name, blob)
       request_binary(:put, "/vaults/#{URI.encode_uri_component(name)}", blob)
     end
 
-    # GET /api/v1/vaults/:name — returns raw binary blob
+    # Download a vault bundle from the cloud (raw binary).
+    #
+    # @param name [String] vault name
+    # @return [String] raw binary blob for SyncBundle.unpack
+    # @raise [ApiError] on HTTP or network failure (404 if vault not found)
     def pull_vault(name)
       request_raw(:get, "/vaults/#{URI.encode_uri_component(name)}")
     end
 
-    # DELETE /api/v1/vaults/:name
+    # Delete a vault from the cloud.
+    #
+    # @param name [String] vault name to delete
+    # @return [Hash] confirmation response
+    # @raise [ApiError] on HTTP or network failure
     def delete_vault(name)
       delete("/vaults/#{URI.encode_uri_component(name)}")
     end

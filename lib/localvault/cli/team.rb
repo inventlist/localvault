@@ -6,6 +6,11 @@ module LocalVault
     class Team < Thor
       desc "list [VAULT]", "Show who has access to a vault"
       method_option :vault, type: :string, aliases: "-v"
+      # List all users who have access to a vault.
+      #
+      # Checks sync-based key slots first; falls back to direct shares if no
+      # key slots exist. Displays member handles (key slots) or a share table
+      # with ID, recipient, status, and date.
       def list(vault_name = nil)
         unless Config.token
           $stderr.puts "Error: Not logged in."
@@ -52,6 +57,11 @@ module LocalVault
 
       desc "add HANDLE", "Add a teammate to a synced vault via key slot"
       method_option :vault, type: :string, aliases: "-v"
+      # Grant a user access to a synced vault by creating a key slot.
+      #
+      # Fetches the recipient's public key from InventList, encrypts the vault's
+      # master key for them, adds the key slot to the bundle, and pushes. The
+      # vault must be unlocked locally. Also ensures the owner's own key slot exists.
       def add(handle)
         unless Config.token
           $stderr.puts "Error: Not logged in."
@@ -133,6 +143,12 @@ module LocalVault
       desc "remove HANDLE", "Remove a person's access to a vault"
       method_option :vault, type: :string, aliases: "-v"
       method_option :rotate, type: :boolean, default: false, desc: "Re-encrypt vault with new master key (full revocation)"
+      # Remove a user's access to a vault.
+      #
+      # Removes the user's key slot and pushes the updated bundle. With +--rotate+,
+      # re-encrypts the vault with a new master key and recreates all remaining
+      # key slots for full cryptographic revocation. Falls back to revoking a
+      # direct share if no key slots exist.
       def remove(handle)
         unless Config.token
           $stderr.puts "Error: Not logged in."

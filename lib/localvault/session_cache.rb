@@ -22,6 +22,13 @@ module LocalVault
     DEFAULT_TTL_HOURS = 8
     KEYCHAIN_SERVICE  = "localvault"
 
+    # Retrieve a cached master key for the given vault.
+    #
+    # Returns nil if no entry exists or the entry has expired. Expired entries
+    # are automatically cleaned up.
+    #
+    # @param vault_name [String] the vault name to look up
+    # @return [String, nil] raw master key bytes, or nil if not cached/expired
     def self.get(vault_name)
       payload = keychain_get(vault_name)
       return nil unless payload
@@ -40,16 +47,29 @@ module LocalVault
       nil
     end
 
+    # Cache a master key for the given vault with a time-to-live.
+    #
+    # @param vault_name [String] the vault name to cache
+    # @param master_key [String] raw master key bytes to store
+    # @param ttl_hours [Integer] hours until expiry (default: 8)
+    # @return [void]
     def self.set(vault_name, master_key, ttl_hours: DEFAULT_TTL_HOURS)
       expiry  = Time.now.to_i + (ttl_hours * 3600).to_i
       payload = "#{Base64.strict_encode64(master_key)}|#{expiry}"
       keychain_set(vault_name, payload)
     end
 
+    # Remove the cached master key for a single vault.
+    #
+    # @param vault_name [String] the vault name to clear
+    # @return [void]
     def self.clear(vault_name)
       keychain_delete(vault_name)
     end
 
+    # Remove cached master keys for all known vaults.
+    #
+    # @return [void]
     def self.clear_all
       Store.list_vaults.each { |name| clear(name) }
     end

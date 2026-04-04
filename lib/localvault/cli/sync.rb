@@ -5,6 +5,12 @@ module LocalVault
   class CLI
     class Sync < Thor
       desc "push [NAME]", "Push a vault to InventList cloud sync"
+      # Push a local vault to InventList cloud sync.
+      #
+      # Packs the vault's meta and encrypted secrets into a SyncBundle and uploads
+      # it. Preserves existing key slots from the remote and bootstraps an owner
+      # slot if the current identity has no slot yet. Defaults to the configured
+      # default vault if no name is given.
       def push(vault_name = nil)
         return unless logged_in?
 
@@ -30,6 +36,12 @@ module LocalVault
 
       desc "pull [NAME]", "Pull a vault from InventList cloud sync"
       method_option :force, type: :boolean, default: false, desc: "Overwrite existing local vault"
+      # Pull a vault from InventList cloud sync to the local filesystem.
+      #
+      # Downloads the SyncBundle, writes meta.yml and secrets.enc locally, and
+      # attempts automatic unlock via key slot. Refuses to overwrite an existing
+      # local vault unless +--force+ is passed. Defaults to the configured default
+      # vault if no name is given.
       def pull(vault_name = nil)
         return unless logged_in?
 
@@ -72,6 +84,10 @@ module LocalVault
       end
 
       desc "status", "Show sync status for all vaults"
+      # Display sync status for all local and remote vaults.
+      #
+      # Shows a table with vault name, status (synced / remote only / local only),
+      # and last sync timestamp. Compares local vaults against the cloud inventory.
       def status
         return unless logged_in?
 

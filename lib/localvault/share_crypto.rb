@@ -20,9 +20,14 @@ module LocalVault
     class DecryptionError < StandardError; end
 
     # Encrypt a secrets hash for a recipient using their X25519 public key.
-    # Uses an ephemeral sender keypair (Box construction) so the sender's
-    # identity private key is never transmitted.
-    # Returns a base64-encoded JSON blob.
+    #
+    # Uses an ephemeral sender keypair (NaCl Box construction) so the sender's
+    # identity private key is never transmitted. The returned blob contains the
+    # ephemeral public key, nonce, and ciphertext.
+    #
+    # @param secrets [Hash] key-value pairs to encrypt (e.g. {"API_KEY" => "sk-..."})
+    # @param recipient_pub_key_b64 [String] recipient's X25519 public key, base64-encoded
+    # @return [String] base64-encoded JSON payload containing sender_pub, nonce, and ciphertext
     def self.encrypt_for(secrets, recipient_pub_key_b64)
       recipient_pub = RbNaCl::PublicKey.new(Base64.strict_decode64(recipient_pub_key_b64))
       ephemeral_sk  = RbNaCl::PrivateKey.generate
@@ -40,8 +45,15 @@ module LocalVault
       Base64.strict_encode64(JSON.generate(payload))
     end
 
-    # Decrypt an encrypted_payload using the recipient's private key.
-    # Returns the decrypted secrets hash { "KEY" => "value", ... }.
+    # Decrypt a shared payload using the recipient's private key.
+    #
+    # Reverses the envelope produced by {.encrypt_for}, extracting the ephemeral
+    # sender public key and using NaCl Box to decrypt.
+    #
+    # @param encrypted_payload_b64 [String] base64-encoded payload from {.encrypt_for}
+    # @param my_private_key_bytes [String] recipient's raw X25519 private key bytes
+    # @return [Hash] decrypted secrets (e.g. {"API_KEY" => "sk-..."})
+    # @raise [DecryptionError] when the key is wrong, payload is tampered, or format is invalid
     def self.decrypt_from(encrypted_payload_b64, my_private_key_bytes)
       raw     = Base64.strict_decode64(encrypted_payload_b64)
       payload = JSON.parse(raw)

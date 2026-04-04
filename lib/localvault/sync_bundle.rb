@@ -27,9 +27,14 @@ module LocalVault
     VERSION = 2
     SUPPORTED_VERSIONS = [1, 2].freeze
 
-    # Pack a vault's meta.yml + secrets.enc into a single JSON blob.
-    # The secrets.enc is already encrypted — this bundle is opaque to the server.
-    # key_slots: optional hash of { "handle" => { "pub" => b64, "enc_key" => b64 }, ... }
+    # Pack a vault's meta.yml and secrets.enc into a single JSON blob for sync.
+    #
+    # The secrets.enc is already encrypted -- the bundle is opaque to the server.
+    #
+    # @param store [Store] the vault store to pack
+    # @param key_slots [Hash] per-user encrypted master keys
+    #   (e.g. {"alice" => {"pub" => "b64...", "enc_key" => "b64..."}})
+    # @return [String] JSON string ready for upload via ApiClient#push_vault
     def self.pack(store, key_slots: {})
       meta_content    = File.read(store.meta_path)
       secrets_content = store.read_encrypted || ""
@@ -41,9 +46,15 @@ module LocalVault
       )
     end
 
-    # Unpack a blob back into {meta:, secrets:, key_slots:}.
-    # Pass expected_name: to validate the meta.yml name matches the vault being pulled.
-    # v1 bundles return empty key_slots for backward compatibility.
+    # Unpack a sync blob back into its component parts.
+    #
+    # Validates the bundle version and optionally checks that the embedded vault
+    # name matches expectations. v1 bundles (no key_slots) return empty key_slots.
+    #
+    # @param blob [String] JSON string from ApiClient#pull_vault
+    # @param expected_name [String, nil] if set, validates the meta.yml vault name matches
+    # @return [Hash] +{meta: String, secrets: String, key_slots: Hash}+
+    # @raise [UnpackError] on invalid format, unsupported version, or name mismatch
     def self.unpack(blob, expected_name: nil)
       data = JSON.parse(blob)
       version = data["version"]

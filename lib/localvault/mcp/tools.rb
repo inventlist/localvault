@@ -10,6 +10,8 @@ module LocalVault
         }
       }.freeze
 
+      # MCP tool definitions conforming to the MCP tools/list schema.
+      # Each entry specifies a tool name, description, and JSON Schema for input.
       DEFINITIONS = [
         {
           "name" => "get_secret",
@@ -59,7 +61,17 @@ module LocalVault
         }
       ].freeze
 
-      # vault_resolver: callable that takes a vault name (String or nil) and returns a Vault or nil
+      # Dispatch an MCP tool call by name.
+      #
+      # Resolves the target vault via the provided callable, then executes the
+      # requested tool (get_secret, list_secrets, set_secret, or delete_secret).
+      #
+      # @param name [String] tool name (must match a DEFINITIONS entry)
+      # @param arguments [Hash] tool arguments (e.g. {"key" => "API_KEY", "vault" => "prod"})
+      # @param vault_resolver [#call] callable that accepts a vault name (String or nil)
+      #   and returns a Vault instance or nil
+      # @return [Hash] MCP content result with "content" array and optional "isError"
+      # @raise [ArgumentError] if the tool name is unknown
       def self.call(name, arguments, vault_resolver)
         unless DEFINITIONS.any? { |t| t["name"] == name }
           raise ArgumentError, "Unknown tool: #{name}"

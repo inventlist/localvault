@@ -11,6 +11,10 @@ require_relative "tools"
 module LocalVault
   module MCP
     class Server
+      # Create an MCP server reading JSON-RPC from input, writing responses to output.
+      #
+      # @param input [IO] input stream for JSON-RPC messages (default: $stdin)
+      # @param output [IO] output stream for JSON-RPC responses (default: $stdout)
       def initialize(input: $stdin, output: $stdout)
         @input        = input
         @output       = output
@@ -18,6 +22,12 @@ module LocalVault
         @session_vault = load_session_vault  # LOCALVAULT_SESSION fast-path
       end
 
+      # Start the MCP server loop, reading JSON-RPC messages line-by-line.
+      #
+      # Logs available unlocked vaults to stderr on startup. Blocks until
+      # input is exhausted or interrupted (Ctrl-C).
+      #
+      # @return [void]
       def start
         unlocked = unlocked_vault_names
         label = unlocked.empty? ? "no unlocked vaults (run: localvault show)" : "vaults=#{unlocked.join(', ')}"
@@ -41,6 +51,13 @@ module LocalVault
         $stderr.flush
       end
 
+      # Parse and dispatch a single JSON-RPC message.
+      #
+      # Handles +initialize+, +tools/list+, and +tools/call+ methods.
+      # Notifications (no "id" field) return nil.
+      #
+      # @param json_string [String] raw JSON-RPC message
+      # @return [Hash, nil] JSON-RPC response hash, or nil for notifications
       def handle_message(json_string)
         message = JSON.parse(json_string)
 

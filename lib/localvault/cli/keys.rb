@@ -5,6 +5,11 @@ module LocalVault
     class Keys < Thor
       desc "generate", "Generate an X25519 keypair for vault sharing"
       method_option :force, type: :boolean, default: false, desc: "Overwrite existing keypair"
+      # Generate a new X25519 keypair for vault sharing.
+      #
+      # Creates a private/public key pair in the LocalVault config directory.
+      # Refuses to overwrite an existing keypair unless +--force+ is passed.
+      # After generating, run +localvault keys publish+ to upload the public key.
       def generate
         if Identity.exists? && !options[:force]
           $stdout.puts "Keypair already exists at #{Config.keys_path}"
@@ -24,6 +29,11 @@ module LocalVault
       end
 
       desc "publish", "Upload your public key to InventList"
+      # Publish your X25519 public key to InventList.
+      #
+      # Requires a keypair (run +localvault keys generate+ first) and an active
+      # connection (run +localvault connect+ first). Once published, other users
+      # can share vaults with you.
       def publish
         unless Identity.exists?
           $stderr.puts "Error: No keypair found. Run: localvault keys generate"
@@ -44,6 +54,10 @@ module LocalVault
       end
 
       desc "show", "Display your public key"
+      # Print your base64-encoded X25519 public key to stdout.
+      #
+      # Useful for manual key exchange or verification. Requires a keypair
+      # to exist (run +localvault keys generate+ first).
       def show
         unless Identity.exists?
           $stderr.puts "Error: No keypair found. Run: localvault keys generate"
