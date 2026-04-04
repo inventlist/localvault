@@ -129,6 +129,41 @@ module LocalVault
         $stderr.puts "Error: #{e.message}"
       end
 
+      desc "verify HANDLE", "Check if a user exists and has a public key for sharing"
+      # Verify a user's handle and public key status before adding them.
+      #
+      # Checks InventList for the handle and whether they have a published
+      # X25519 public key. Does not modify anything.
+      def verify(handle)
+        unless Config.token
+          $stderr.puts "Error: Not logged in."
+          $stderr.puts "\n  localvault login YOUR_TOKEN\n"
+          $stderr.puts "Get your token at: https://inventlist.com/settings"
+          return
+        end
+
+        handle = handle.delete_prefix("@")
+        client = ApiClient.new(token: Config.token)
+        result = client.get_public_key(handle)
+        pub_key = result["public_key"]
+
+        if pub_key && !pub_key.empty?
+          fingerprint = pub_key.length > 12 ? "#{pub_key[0..7]}...#{pub_key[-4..]}" : pub_key
+          $stdout.puts "@#{handle} — public key published"
+          $stdout.puts "  Fingerprint: #{fingerprint}"
+          $stdout.puts "  Ready for: localvault team add @#{handle} -v VAULT"
+        else
+          $stderr.puts "@#{handle} exists but has no public key published."
+          $stderr.puts "They need to run: localvault login TOKEN"
+        end
+      rescue ApiClient::ApiError => e
+        if e.status == 404
+          $stderr.puts "Error: @#{handle} not found on InventList."
+        else
+          $stderr.puts "Error: #{e.message}"
+        end
+      end
+
       desc "add HANDLE", "Add a teammate to a synced vault via key slot"
       method_option :vault, type: :string, aliases: "-v"
       method_option :scope, type: :array, desc: "Groups or keys to share (omit for full access)"
