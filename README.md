@@ -79,9 +79,11 @@ localvault exec -- node app.js
 | `sync push` | Push vault to InventList cloud |
 | `sync pull` | Pull vault from InventList cloud |
 | `sync status` | Show sync state for all vaults |
-| `team add @handle` | Add a teammate to a synced vault |
-| `team remove @handle` | Remove a teammate (with optional `--rotate`) |
+| `team init` | Initialize a vault as a team vault (sets you as owner) |
+| `team add @handle` | Add a teammate (with optional `--scope`) |
+| `team remove @handle` | Remove a teammate (with optional `--rotate` or `--scope`) |
 | `team list` | Show who has access to a synced vault |
+| `team rotate` | Re-encrypt vault with new passphrase (no member changes) |
 | `version` | Print version |
 
 All vault commands accept `--vault NAME` (or `-v NAME`) to target a specific vault. Defaults to `default`.
@@ -174,25 +176,38 @@ localvault sync status
 
 ## Team Sharing
 
-Share vault access with teammates using X25519 key slots. Each member's master key copy is encrypted to their public key — the server only stores ciphertext.
+Share vault access with teammates using X25519 key slots. Three modes: personal sync (just you), direct share (one-time handoff), and team sync (ongoing shared access with scoping).
 
 ```bash
-# Add a teammate (they need a published public key on InventList)
+# Initialize a vault as a team vault (you become the owner)
+localvault team init -v production
+
+# Add a teammate with full access
 localvault team add @bob -v production
+
+# Add a teammate with scoped access (only specific keys)
+localvault team add @carol -v production --scope platepose DATABASE_URL
 
 # See who has access
 localvault team list -v production
-# => @alice (you)
-# => @bob
+# => @alice  (owner)
+# => @bob    (full vault)
+# => @carol  (scopes: platepose, DATABASE_URL)
 
-# Remove access (stops future sync pulls)
+# Remove access
 localvault team remove @bob -v production
 
-# Remove + re-encrypt vault with new master key (full revocation)
+# Remove a specific scope (keeps other scopes)
+localvault team remove @carol -v production --scope DATABASE_URL
+
+# Remove + re-encrypt with new passphrase (full revocation)
 localvault team remove @bob -v production --rotate
+
+# Re-key without removing anyone (periodic rotation)
+localvault team rotate -v production
 ```
 
-When a teammate pulls a vault they have a key slot for, it auto-unlocks via their identity key — no passphrase needed.
+When a teammate pulls a vault they have a key slot for, it auto-unlocks via their identity key. Scoped members see only their authorized keys — they don't know other keys exist.
 
 ## MCP Server (AI Agents)
 
