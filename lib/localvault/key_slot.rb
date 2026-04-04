@@ -17,8 +17,13 @@ module LocalVault
     class DecryptionError < StandardError; end
 
     # Encrypt a master key for a recipient's X25519 public key.
-    # Returns a base64-encoded ciphertext string.
-    # Uses an ephemeral sender keypair (same Box construction as ShareCrypto).
+    #
+    # Uses an ephemeral sender keypair so the recipient can decrypt
+    # without knowing who sent it.
+    #
+    # @param master_key [String] raw 32-byte master key to encrypt
+    # @param recipient_pub_key_b64 [String] base64-encoded X25519 public key
+    # @return [String] base64-encoded JSON payload containing the encrypted key slot
     def self.create(master_key, recipient_pub_key_b64)
       recipient_pub = RbNaCl::PublicKey.new(Base64.strict_decode64(recipient_pub_key_b64))
       ephemeral_sk  = RbNaCl::PrivateKey.generate
@@ -36,7 +41,11 @@ module LocalVault
     end
 
     # Decrypt a key slot using the recipient's private key.
-    # Returns the raw master key bytes.
+    #
+    # @param slot_b64 [String] base64-encoded key slot from +create+
+    # @param my_private_key_bytes [String] raw 32-byte X25519 private key
+    # @return [String] raw master key bytes
+    # @raise [DecryptionError] when the key is wrong, data is tampered, or format is invalid
     def self.decrypt(slot_b64, my_private_key_bytes)
       raw        = Base64.strict_decode64(slot_b64)
       payload    = JSON.parse(raw)

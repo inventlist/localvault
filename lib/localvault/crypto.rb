@@ -46,10 +46,18 @@ module LocalVault
     ARGON2_OPSLIMIT = 2
     ARGON2_MEMLIMIT = 67_108_864 # 64 MB
 
+    # Generate a random salt for key derivation.
+    #
+    # @return [String] 16 random bytes
     def self.generate_salt
       RbNaCl::Random.random_bytes(SALT_BYTES)
     end
 
+    # Derive a 32-byte master key from a passphrase using Argon2id.
+    #
+    # @param passphrase [String] the user's passphrase
+    # @param salt [String] 16-byte salt
+    # @return [String] 32-byte derived key
     def self.derive_master_key(passphrase, salt)
       RbNaCl::PasswordHash.argon2id(
         passphrase,
@@ -60,6 +68,11 @@ module LocalVault
       )
     end
 
+    # Encrypt plaintext with XSalsa20-Poly1305. Prepends a random nonce.
+    #
+    # @param plaintext [String] data to encrypt
+    # @param key [String] 32-byte symmetric key
+    # @return [String] nonce (24 bytes) + ciphertext
     def self.encrypt(plaintext, key)
       box = RbNaCl::SecretBox.new(key)
       nonce = RbNaCl::Random.random_bytes(NONCE_BYTES)
@@ -67,6 +80,12 @@ module LocalVault
       nonce + ciphertext
     end
 
+    # Decrypt ciphertext produced by +encrypt+. Expects nonce prepended.
+    #
+    # @param ciphertext_with_nonce [String] nonce (24 bytes) + ciphertext
+    # @param key [String] 32-byte symmetric key
+    # @return [String] decrypted plaintext
+    # @raise [DecryptionError] when the key is wrong or data is tampered
     def self.decrypt(ciphertext_with_nonce, key)
       box = RbNaCl::SecretBox.new(key)
       nonce = ciphertext_with_nonce[0, NONCE_BYTES]
@@ -76,6 +95,9 @@ module LocalVault
       raise DecryptionError, "Decryption failed: #{e.message}"
     end
 
+    # Generate an X25519 keypair for asymmetric encryption.
+    #
+    # @return [Hash{Symbol => String}] +:public_key+ and +:private_key+ as raw bytes
     def self.generate_keypair
       sk = RbNaCl::PrivateKey.generate
       {
@@ -84,10 +106,21 @@ module LocalVault
       }
     end
 
+    # Encrypt a private key with a master key (convenience wrapper around +encrypt+).
+    #
+    # @param private_key_bytes [String] raw private key bytes
+    # @param master_key [String] 32-byte symmetric key
+    # @return [String] nonce + ciphertext
     def self.encrypt_private_key(private_key_bytes, master_key)
       encrypt(private_key_bytes, master_key)
     end
 
+    # Decrypt a private key with a master key (convenience wrapper around +decrypt+).
+    #
+    # @param encrypted_bytes [String] nonce + ciphertext from +encrypt_private_key+
+    # @param master_key [String] 32-byte symmetric key
+    # @return [String] raw private key bytes
+    # @raise [DecryptionError] when the key is wrong or data is tampered
     def self.decrypt_private_key(encrypted_bytes, master_key)
       decrypt(encrypted_bytes, master_key)
     end
