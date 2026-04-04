@@ -107,6 +107,56 @@ class TeamRemoveSyncTest < Minitest::Test
     assert slots.key?("bob")
   end
 
+  # ── Owner-only enforcement ──
+
+  def test_remove_rejects_non_owner
+    LocalVault::Config.inventlist_handle = "bob"
+    blob = build_blob_with_slots({
+      "alice" => slot_for(LocalVault::Identity.public_key),
+      "bob"   => slot_for(@bob_pub)
+    })
+    @fake_client.set_pull_response(blob)
+
+    _, err = run_team_remove("@bob", "production")
+
+    assert_match(/only.*owner/i, err)
+    assert_nil @fake_client.calls.find { |c| c[:method] == :push_vault }, "Non-owner should not push"
+  end
+
+  def test_rotate_rejects_non_owner
+    LocalVault::Config.inventlist_handle = "bob"
+    blob = build_blob_with_slots({
+      "alice" => slot_for(LocalVault::Identity.public_key),
+      "bob"   => slot_for(@bob_pub)
+    })
+    @fake_client.set_pull_response(blob)
+
+    original = LocalVault::CLI::Team.instance_method(:prompt_passphrase)
+    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase) { |_msg = ""| "newpass" }
+    _, err = run_team_remove_rotate("@bob", "production")
+    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase, original)
+
+    assert_match(/only.*owner/i, err)
+    assert_nil @fake_client.calls.find { |c| c[:method] == :push_vault }, "Non-owner should not push"
+  end
+
+  # ── Legacy v2 vault rejection ──
+
+  def test_remove_rejects_legacy_v2_vault
+    v2_blob = JSON.generate({
+      "version" => 2,
+      "meta" => Base64.strict_encode64(YAML.dump({ "name" => "production" })),
+      "secrets" => Base64.strict_encode64(""),
+      "key_slots" => { "alice" => { "pub" => "apub", "enc_key" => "akey" }, "bob" => { "pub" => "bpub", "enc_key" => "bkey" } }
+    })
+    @fake_client.set_pull_response(v2_blob)
+
+    _, err = run_team_remove("@bob", "production")
+
+    assert_match(/not a team vault|team init/i, err)
+    assert_nil @fake_client.calls.find { |c| c[:method] == :push_vault }, "Should not push on v2 vault"
+  end
+
   def test_remove_requires_login
     LocalVault::Config.token = nil
 
@@ -199,7 +249,7 @@ class TeamRemoveSyncTest < Minitest::Test
 
   def build_blob_with_slots(slots)
     store = LocalVault::Store.new("production")
-    LocalVault::SyncBundle.pack_v3(store, owner: "test", key_slots: slots)
+    LocalVault::SyncBundle.pack_v3(store, owner: "alice", key_slots: slots)
   end
 
   def run_team_remove(handle, vault_name)

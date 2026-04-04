@@ -282,9 +282,20 @@ module LocalVault
         client = ApiClient.new(token: Config.token)
 
         # Try sync-based key slot removal first
-        key_slots = load_key_slots(client, vault_name)
-        if key_slots && !key_slots.empty?
-          remove_key_slot(handle, vault_name, key_slots, client, rotate: options[:rotate], remove_scopes: options[:scope])
+        team_data = load_team_data(client, vault_name)
+        if team_data && team_data[:key_slots] && !team_data[:key_slots].empty?
+          # Must be a v3 team vault with owner
+          unless team_data[:owner]
+            $stderr.puts "Error: Vault '#{vault_name}' is not a team vault. Run: localvault team init -v #{vault_name}"
+            return
+          end
+          unless team_data[:owner] == Config.inventlist_handle
+            $stderr.puts "Error: Only the vault owner (@#{team_data[:owner]}) can manage team access."
+            return
+          end
+          remove_key_slot(handle, vault_name, team_data[:key_slots], client,
+                          rotate: options[:rotate], remove_scopes: options[:scope],
+                          owner: team_data[:owner])
           return
         end
 
@@ -320,11 +331,24 @@ module LocalVault
         vault_name = options[:vault] || Config.default_vault
         client = ApiClient.new(token: Config.token)
 
-        key_slots = load_key_slots(client, vault_name)
-        unless key_slots && !key_slots.empty?
+        team_data = load_team_data(client, vault_name)
+        unless team_data && team_data[:key_slots] && !team_data[:key_slots].empty?
           $stderr.puts "Error: Vault '#{vault_name}' has no team access. Nothing to rotate."
           return
         end
+
+        unless team_data[:owner]
+          $stderr.puts "Error: Vault '#{vault_name}' is not a team vault. Run: localvault team init -v #{vault_name}"
+          return
+        end
+
+        unless team_data[:owner] == Config.inventlist_handle
+          $stderr.puts "Error: Only the vault owner (@#{team_data[:owner]}) can rotate keys."
+          return
+        end
+
+        key_slots = team_data[:key_slots]
+        vault_owner = team_data[:owner]
 
         master_key = SessionCache.get(vault_name)
         unless master_key
@@ -361,7 +385,7 @@ module LocalVault
           end
         end
 
-        blob = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: new_slots)
+        blob = SyncBundle.pack_v3(store, owner: vault_owner, key_slots: new_slots)
         client.push_vault(vault_name, blob)
         SessionCache.set(vault_name, new_master_key)
 
@@ -381,17 +405,24 @@ module LocalVault
       end
 
       def load_key_slots(client, vault_name)
+        data = load_team_data(client, vault_name)
+        data ? data[:key_slots] : nil
+      end
+
+      # Load full bundle data including owner. Returns nil if no remote or not a team vault.
+      def load_team_data(client, vault_name)
         return nil unless client.respond_to?(:pull_vault)
         blob = client.pull_vault(vault_name)
         return nil unless blob.is_a?(String) && !blob.empty?
         data = SyncBundle.unpack(blob)
-        slots = data[:key_slots]
-        slots.is_a?(Hash) ? slots : nil
+        return nil unless data[:key_slots].is_a?(Hash)
+        data
       rescue ApiClient::ApiError, SyncBundle::UnpackError, NoMethodError
         nil
       end
 
-      def remove_key_slot(handle, vault_name, key_slots, client, rotate: false, remove_scopes: nil)
+      def remove_key_slot(handle, vault_name, key_slots, client, rotate: false, remove_scopes: nil, owner: nil)
+        owner ||= Config.inventlist_handle
         unless key_slots.key?(handle)
           $stderr.puts "Error: @#{handle} has no slot in vault '#{vault_name}'."
           return
@@ -425,7 +456,7 @@ module LocalVault
             $stdout.puts "Removed scope(s) #{remove_scopes.join(", ")} from @#{handle}. Remaining: #{remaining.join(", ")}"
           end
 
-          blob = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: key_slots)
+          blob = SyncBundle.pack_v3(store, owner: owner, key_slots: key_slots)
           client.push_vault(vault_name, blob)
           return
         end
@@ -484,7 +515,7 @@ module LocalVault
             end
           end
 
-          blob = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: new_slots)
+          blob = SyncBundle.pack_v3(store, owner: owner, key_slots: new_slots)
           client.push_vault(vault_name, blob)
 
           if new_slots.key?(Config.inventlist_handle)
@@ -496,7 +527,7 @@ module LocalVault
           $stdout.puts "Removed @#{handle} from vault '#{vault_name}'."
           $stdout.puts "Vault re-encrypted with new master key (rotated)."
         else
-          blob = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: key_slots)
+          blob = SyncBundle.pack_v3(store, owner: owner, key_slots: key_slots)
           client.push_vault(vault_name, blob)
           $stdout.puts "Removed @#{handle} from vault '#{vault_name}'."
         end
