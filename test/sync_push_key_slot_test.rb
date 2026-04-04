@@ -91,7 +91,7 @@ class SyncPushKeySlotTest < Minitest::Test
     existing_slots = {
       "teammate" => { "pub" => "their_pub_key", "enc_key" => "their_enc_key" }
     }
-    prior_blob = LocalVault::SyncBundle.pack(store, key_slots: existing_slots)
+    prior_blob = LocalVault::SyncBundle.pack_v3(store, owner: "test", key_slots: existing_slots)
     @fake_client.set_response(:pull_vault, prior_blob)
 
     push_and_capture("default")

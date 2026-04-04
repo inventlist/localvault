@@ -5,55 +5,64 @@ require "yaml"
 module LocalVault
   # Packs and unpacks vault data for cloud sync via InventList + R2.
   #
-  # A bundle is a JSON blob containing:
-  # - +version+ — bundle format version (currently 2)
-  # - +meta+ — base64-encoded meta.yml (salt, name, timestamps)
-  # - +secrets+ — base64-encoded secrets.enc (already encrypted)
-  # - +key_slots+ — hash of per-user encrypted master keys (v2+)
+  # Bundle versions:
+  # - v1: personal sync — +{ version, meta, secrets }+
+  # - v2: legacy team — +{ version, meta, secrets, key_slots }+
+  # - v3: team with ownership — +{ version, owner, meta, secrets, key_slots }+
   #
   # The server never sees plaintext — the bundle is opaque ciphertext.
-  # v1 bundles (no key_slots) are supported for backward compatibility.
   #
-  # @example Pack and unpack
-  #   blob = SyncBundle.pack(store, key_slots: {"alice" => {...}})
-  #   data = SyncBundle.unpack(blob, expected_name: "myvault")
-  #   data[:meta]      # => YAML string
-  #   data[:secrets]   # => encrypted bytes
-  #   data[:key_slots] # => {"alice" => {...}}
+  # @example Personal sync (v1)
+  #   blob = SyncBundle.pack(store)
+  #
+  # @example Team sync (v3)
+  #   blob = SyncBundle.pack_v3(store, owner: "alice", key_slots: slots)
+  #   data = SyncBundle.unpack(blob)
+  #   data[:owner]     # => "alice"
+  #   data[:key_slots] # => {"alice" => {...}, "bob" => {...}}
   module SyncBundle
     # Raised when unpacking fails (bad JSON, missing fields, wrong version, invalid encoding).
     class UnpackError < StandardError; end
 
-    VERSION = 2
-    SUPPORTED_VERSIONS = [1, 2].freeze
+    SUPPORTED_VERSIONS = [1, 2, 3].freeze
 
-    # Pack a vault's meta.yml and secrets.enc into a single JSON blob for sync.
-    #
-    # The secrets.enc is already encrypted -- the bundle is opaque to the server.
+    # Pack a personal vault — v1 format, no key_slots, no owner.
     #
     # @param store [Store] the vault store to pack
-    # @param key_slots [Hash] per-user encrypted master keys
-    #   (e.g. {"alice" => {"pub" => "b64...", "enc_key" => "b64..."}})
-    # @return [String] JSON string ready for upload via ApiClient#push_vault
-    def self.pack(store, key_slots: {})
+    # @return [String] JSON string ready for upload
+    def self.pack(store)
       meta_content    = File.read(store.meta_path)
       secrets_content = store.read_encrypted || ""
       JSON.generate(
-        "version"   => VERSION,
+        "version" => 1,
+        "meta"    => Base64.strict_encode64(meta_content),
+        "secrets" => Base64.strict_encode64(secrets_content)
+      )
+    end
+
+    # Pack a team vault — v3 format with owner, key_slots, and per-member blobs.
+    #
+    # @param store [Store] the vault store to pack
+    # @param owner [String] the owner's InventList handle
+    # @param key_slots [Hash] per-user key slot data
+    # @return [String] JSON string ready for upload
+    def self.pack_v3(store, owner:, key_slots: {})
+      meta_content    = File.read(store.meta_path)
+      secrets_content = store.read_encrypted || ""
+      JSON.generate(
+        "version"   => 3,
+        "owner"     => owner,
         "meta"      => Base64.strict_encode64(meta_content),
         "secrets"   => Base64.strict_encode64(secrets_content),
         "key_slots" => key_slots
       )
     end
 
-    # Unpack a sync blob back into its component parts.
-    #
-    # Validates the bundle version and optionally checks that the embedded vault
-    # name matches expectations. v1 bundles (no key_slots) return empty key_slots.
+    # Unpack any version bundle into its component parts.
     #
     # @param blob [String] JSON string from ApiClient#pull_vault
     # @param expected_name [String, nil] if set, validates the meta.yml vault name matches
-    # @return [Hash] +{meta: String, secrets: String, key_slots: Hash}+
+    # @return [Hash] +{meta:, secrets:, key_slots:, owner:}+
     # @raise [UnpackError] on invalid format, unsupported version, or name mismatch
     def self.unpack(blob, expected_name: nil)
       data = JSON.parse(blob)
@@ -63,6 +72,7 @@ module LocalVault
       meta_raw    = Base64.strict_decode64(data.fetch("meta"))
       secrets_raw = Base64.strict_decode64(data.fetch("secrets"))
       key_slots   = data["key_slots"].is_a?(Hash) ? data["key_slots"] : {}
+      owner       = data["owner"]
 
       if expected_name
         meta_parsed = YAML.safe_load(meta_raw)
@@ -72,7 +82,7 @@ module LocalVault
         end
       end
 
-      { meta: meta_raw, secrets: secrets_raw, key_slots: key_slots }
+      { meta: meta_raw, secrets: secrets_raw, key_slots: key_slots, owner: owner }
     rescue JSON::ParserError => e
       raise UnpackError, "Invalid sync bundle format: #{e.message}"
     rescue KeyError => e

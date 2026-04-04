@@ -73,22 +73,24 @@ class SyncBundleV2Test < Minitest::Test
 
   # ── Pack produces version 2 ──
 
-  def test_pack_produces_version_2
+  def test_personal_pack_produces_version_1
     vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
     store = LocalVault::Store.new("test")
 
     blob = LocalVault::SyncBundle.pack(store)
     data = JSON.parse(blob)
-    assert_equal 2, data["version"]
+    assert_equal 1, data["version"]
+    refute data.key?("key_slots")
   end
 
-  def test_pack_includes_empty_key_slots_by_default
+  def test_pack_v3_includes_key_slots
     vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
     store = LocalVault::Store.new("test")
 
-    blob = LocalVault::SyncBundle.pack(store)
+    blob = LocalVault::SyncBundle.pack_v3(store, owner: "test", key_slots: {})
     data = JSON.parse(blob)
     assert_equal({}, data["key_slots"])
+    assert_equal 3, data["version"]
   end
 
   def test_pack_with_key_slots
@@ -96,7 +98,7 @@ class SyncBundleV2Test < Minitest::Test
     store = LocalVault::Store.new("test")
 
     slots = { "alice" => { "pub" => "abc", "enc_key" => "xyz" } }
-    blob = LocalVault::SyncBundle.pack(store, key_slots: slots)
+    blob = LocalVault::SyncBundle.pack_v3(store, owner: "test", key_slots: slots)
     data = JSON.parse(blob)
     assert_equal slots, data["key_slots"]
   end
@@ -108,7 +110,7 @@ class SyncBundleV2Test < Minitest::Test
     store = LocalVault::Store.new("test")
 
     slots = { "alice" => { "pub" => "abc", "enc_key" => "xyz" } }
-    blob = LocalVault::SyncBundle.pack(store, key_slots: slots)
+    blob = LocalVault::SyncBundle.pack_v3(store, owner: "test", key_slots: slots)
     result = LocalVault::SyncBundle.unpack(blob)
 
     assert_equal slots, result[:key_slots]
@@ -158,7 +160,7 @@ class SyncBundleV2Test < Minitest::Test
     store = LocalVault::Store.new("test")
 
     slots = { "bob" => { "pub" => "pubkey", "enc_key" => "enckey" } }
-    blob = LocalVault::SyncBundle.pack(store, key_slots: slots)
+    blob = LocalVault::SyncBundle.pack_v3(store, owner: "test", key_slots: slots)
     result = LocalVault::SyncBundle.unpack(blob)
 
     assert result[:meta].include?("test")

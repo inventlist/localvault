@@ -126,7 +126,7 @@ module LocalVault
 
         # Pack and push
         store = Store.new(vault_name)
-        blob = SyncBundle.pack(store, key_slots: key_slots)
+        blob = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: key_slots)
         client.push_vault(vault_name, blob)
 
         $stdout.puts "Added @#{handle} to vault '#{vault_name}'."
@@ -244,7 +244,7 @@ module LocalVault
             new_slots[h] = { "pub" => slot["pub"], "enc_key" => KeySlot.create(new_master_key, slot["pub"]) }
           end
 
-          blob = SyncBundle.pack(store, key_slots: new_slots)
+          blob = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: new_slots)
           client.push_vault(vault_name, blob)
 
           # Only cache new master key if the caller is still a member
@@ -259,7 +259,7 @@ module LocalVault
           $stderr.puts "Note: This vault is now key-slot-only. Passphrase-based access will not work."
           $stderr.puts "Authorized members: #{new_slots.keys.map { |h| "@#{h}" }.join(", ")}"
         else
-          blob = SyncBundle.pack(store, key_slots: key_slots)
+          blob = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: key_slots)
           client.push_vault(vault_name, blob)
           $stdout.puts "Removed @#{handle} from vault '#{vault_name}'."
         end

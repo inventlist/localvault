@@ -25,7 +25,7 @@ module LocalVault
         key_slots = load_existing_key_slots(vault_name)
         key_slots = bootstrap_owner_slot(key_slots, store)
 
-        blob   = SyncBundle.pack(store, key_slots: key_slots)
+        blob   = SyncBundle.pack_v3(store, owner: Config.inventlist_handle || "unknown", key_slots: key_slots)
         client = ApiClient.new(token: Config.token)
         client.push_vault(vault_name, blob)
 

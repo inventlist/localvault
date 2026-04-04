@@ -160,7 +160,7 @@ class TeamAddTest < Minitest::Test
     pub_b64 = LocalVault::Identity.public_key
     enc_key = LocalVault::KeySlot.create(@master_key, pub_b64)
     owner_slots = { "alice" => { "pub" => pub_b64, "enc_key" => enc_key } }
-    LocalVault::SyncBundle.pack(store, key_slots: owner_slots)
+    LocalVault::SyncBundle.pack_v3(store, owner: "test", key_slots: owner_slots)
   end
 
   def run_team_add(handle, vault_name)

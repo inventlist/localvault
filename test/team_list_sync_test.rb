@@ -136,7 +136,7 @@ class TeamListSyncTest < Minitest::Test
 
   def build_blob_with_slots(slots)
     store = LocalVault::Store.new("production")
-    LocalVault::SyncBundle.pack(store, key_slots: slots)
+    LocalVault::SyncBundle.pack_v3(store, owner: "test", key_slots: slots)
   end
 
   def build_v1_blob
