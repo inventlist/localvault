@@ -185,7 +185,7 @@ module LocalVault
           return
         end
 
-        handle = handle.delete_prefix("@")
+        target = handle
         vault_name = options[:vault] || Config.default_vault
         scope_list = options[:scope]
 
@@ -210,7 +210,6 @@ module LocalVault
           return
         end
 
-        # Only owner can add members
         unless data[:owner] == Config.inventlist_handle
           $stderr.puts "Error: Only the vault owner (@#{data[:owner]}) can manage team access."
           return
@@ -218,67 +217,76 @@ module LocalVault
 
         key_slots = data[:key_slots].is_a?(Hash) ? data[:key_slots] : {}
 
-        # Check if member already has full access
-        if key_slots.key?(handle) && key_slots[handle].is_a?(Hash) && key_slots[handle]["scopes"].nil?
-          if scope_list
-            $stdout.puts "@#{handle} already has full vault access."
-            return
-          end
-        end
-
-        # Fetch recipient's public key
-        result = client.get_public_key(handle)
-        pub_key = result["public_key"]
-        unless pub_key && !pub_key.empty?
-          $stderr.puts "Error: @#{handle} has no public key published."
+        # Resolve recipients — single @handle, team:HANDLE, or crew:SLUG
+        recipients = resolve_add_recipients(client, target)
+        if recipients.empty?
+          $stderr.puts "Error: No recipients with public keys found for '#{target}'"
           return
         end
 
-        if scope_list
-          # Accumulate scopes if member already has some
-          existing_scopes = key_slots.dig(handle, "scopes") || []
-          merged_scopes = (existing_scopes + scope_list).uniq
+        added = 0
+        recipients.each do |member_handle, pub_key|
+          next if member_handle == Config.inventlist_handle  # skip self
 
-          # Create per-member blob with filtered secrets
-          vault = Vault.new(name: vault_name, master_key: master_key)
-          filtered = vault.filter(merged_scopes)
-
-          member_key = RbNaCl::Random.random_bytes(32)
-          encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)
-
-          begin
-            enc_key = KeySlot.create(member_key, pub_key)
-          rescue ArgumentError, KeySlot::DecryptionError => e
-            $stderr.puts "Error: @#{handle}'s public key is invalid: #{e.message}"
-            return
+          # Skip if already has full access
+          if key_slots.key?(member_handle) && key_slots[member_handle].is_a?(Hash) && key_slots[member_handle]["scopes"].nil?
+            $stdout.puts "@#{member_handle} already has full vault access." if scope_list
+            next
           end
 
-          key_slots[handle] = {
-            "pub" => pub_key,
-            "enc_key" => enc_key,
-            "scopes" => merged_scopes,
-            "blob" => Base64.strict_encode64(encrypted_blob)
-          }
-        else
-          # Full vault access — encrypt master key directly
-          begin
-            enc_key = KeySlot.create(master_key, pub_key)
-          rescue ArgumentError, KeySlot::DecryptionError => e
-            $stderr.puts "Error: @#{handle}'s public key is invalid: #{e.message}"
-            return
-          end
+          if scope_list
+            existing_scopes = key_slots.dig(member_handle, "scopes") || []
+            merged_scopes = (existing_scopes + scope_list).uniq
 
-          key_slots[handle] = { "pub" => pub_key, "enc_key" => enc_key, "scopes" => nil, "blob" => nil }
+            vault = Vault.new(name: vault_name, master_key: master_key)
+            filtered = vault.filter(merged_scopes)
+
+            member_key = RbNaCl::Random.random_bytes(32)
+            encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)
+
+            begin
+              enc_key = KeySlot.create(member_key, pub_key)
+            rescue ArgumentError, KeySlot::DecryptionError => e
+              $stderr.puts "Error: @#{member_handle}'s public key is invalid: #{e.message}"
+              next
+            end
+
+            key_slots[member_handle] = {
+              "pub" => pub_key, "enc_key" => enc_key,
+              "scopes" => merged_scopes,
+              "blob" => Base64.strict_encode64(encrypted_blob)
+            }
+          else
+            begin
+              enc_key = KeySlot.create(master_key, pub_key)
+            rescue ArgumentError, KeySlot::DecryptionError => e
+              $stderr.puts "Error: @#{member_handle}'s public key is invalid: #{e.message}"
+              next
+            end
+
+            key_slots[member_handle] = { "pub" => pub_key, "enc_key" => enc_key, "scopes" => nil, "blob" => nil }
+          end
+          added += 1
+        end
+
+        if added == 0
+          $stdout.puts "No new members added."
+          return
         end
 
         store = Store.new(vault_name)
         blob = SyncBundle.pack_v3(store, owner: data[:owner], key_slots: key_slots)
         client.push_vault(vault_name, blob)
 
-        if scope_list
-          $stdout.puts "Added @#{handle} to vault '#{vault_name}' (scopes: #{key_slots[handle]["scopes"].join(", ")})."
+        if recipients.size == 1
+          h = recipients.first[0]
+          if scope_list
+            $stdout.puts "Added @#{h} to vault '#{vault_name}' (scopes: #{key_slots[h]["scopes"].join(", ")})."
+          else
+            $stdout.puts "Added @#{h} to vault '#{vault_name}'."
+          end
         else
-          $stdout.puts "Added @#{handle} to vault '#{vault_name}'."
+          $stdout.puts "Added #{added} member(s) to vault '#{vault_name}'."
         end
       rescue ApiClient::ApiError => e
         if e.status == 404
@@ -454,6 +462,33 @@ module LocalVault
         data
       rescue ApiClient::ApiError, SyncBundle::UnpackError, NoMethodError
         nil
+      end
+
+      # Resolve target into list of [handle, public_key] pairs.
+      # Supports @handle, team:HANDLE, and crew:SLUG.
+      def resolve_add_recipients(client, target)
+        if target.start_with?("team:")
+          team_handle = target.delete_prefix("team:")
+          result = client.team_public_keys(team_handle)
+          (result["members"] || [])
+            .select { |m| m["handle"] && m["public_key"] && !m["public_key"].empty? }
+            .map { |m| [m["handle"], m["public_key"]] }
+        elsif target.start_with?("crew:")
+          slug = target.delete_prefix("crew:")
+          result = client.crew_public_keys(slug)
+          (result["members"] || [])
+            .select { |m| m["handle"] && m["public_key"] && !m["public_key"].empty? }
+            .map { |m| [m["handle"], m["public_key"]] }
+        else
+          handle = target.delete_prefix("@")
+          result = client.get_public_key(handle)
+          pub_key = result["public_key"]
+          return [] unless pub_key && !pub_key.empty?
+          [[handle, pub_key]]
+        end
+      rescue ApiClient::ApiError => e
+        $stderr.puts "Warning: #{e.message}"
+        []
       end
 
       # Remove a member's key slot, optionally rotating the vault master key.
