@@ -62,6 +62,16 @@ class TeamRotateTest < Minitest::Test
     assert @fake_client.calls.any? { |c| c[:method] == :push_vault }
   end
 
+  def test_rotate_accepts_positional_vault_name
+    blob = build_v3_blob(owner: "alice")
+    @fake_client.set_pull_response(blob)
+
+    out, = run_rotate_positional("production")
+
+    assert_match(/re-encrypted/i, out)
+    assert @fake_client.calls.any? { |c| c[:method] == :push_vault }
+  end
+
   private
 
   def create_test_vault(name)
@@ -82,6 +92,16 @@ class TeamRotateTest < Minitest::Test
     LocalVault::CLI::Team.send(:define_method, :prompt_passphrase) { |_msg = ""| "newpass" }
     LocalVault::ApiClient.stub(:new, @fake_client) do
       capture_io { LocalVault::CLI.start(["team", "rotate", "--vault", vault_name]) }
+    end
+  ensure
+    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase, original)
+  end
+
+  def run_rotate_positional(vault_name)
+    original = LocalVault::CLI::Team.instance_method(:prompt_passphrase)
+    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase) { |_msg = ""| "newpass" }
+    LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["team", "rotate", vault_name]) }
     end
   ensure
     LocalVault::CLI::Team.send(:define_method, :prompt_passphrase, original)

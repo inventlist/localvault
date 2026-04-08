@@ -77,6 +77,46 @@ class TeamInitTest < Minitest::Test
     assert_match(/already.*team/i, err)
   end
 
+  # ── Positional VAULT arg ──
+
+  def test_init_accepts_positional_vault_name
+    @fake_client.set_pull_response(personal_v1_blob)
+
+    out, = LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["team", "init", "production"]) }
+    end
+
+    assert_match(/team vault/, out)
+    pushed = last_pushed_blob
+    data = JSON.parse(pushed)
+    assert_equal 3, data["version"]
+    assert_equal "alice", data["owner"]
+  end
+
+  def test_init_positional_vault_overrides_default
+    # Flip the default to a different vault so we can verify the positional
+    # arg wins over Config.default_vault fallback.
+    LocalVault::Config.default_vault = "somewhere-else"
+    @fake_client.set_pull_response(personal_v1_blob)
+
+    out, = LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["team", "init", "production"]) }
+    end
+
+    assert_match(/Vault 'production' is now a team vault/, out)
+  ensure
+    LocalVault::Config.default_vault = "default"
+  end
+
+  def test_init_unlocked_error_points_to_unlock
+    LocalVault::SessionCache.clear("production")
+
+    _, err = run_team_init("production")
+
+    assert_match(/not unlocked/i, err)
+    assert_match(/localvault unlock/, err)
+  end
+
   def test_init_preserves_existing_v2_members
     # Simulate a v2 bundle with an existing member
     store = LocalVault::Store.new("production")

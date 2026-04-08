@@ -6,13 +6,16 @@ module LocalVault
     class Team < Thor
       include LocalVault::CLI::TeamHelpers
 
-      desc "init", "Initialize a vault as a team vault (sets you as owner)"
+      desc "init [VAULT]", "Initialize a vault as a team vault (sets you as owner)"
       method_option :vault, type: :string, aliases: "-v"
       # Initialize a vault as a team vault with you as the owner.
       #
       # This is the explicit transition from personal sync to team-shared sync.
       # Creates the owner's key slot and bumps the bundle to v3.
-      def init
+      #
+      # Accepts the vault name as either a positional argument
+      # (`team init intellectaco`) or via --vault/-v.
+      def init(vault_name = nil)
         unless Config.token
           $stderr.puts "Error: Not logged in."
           $stderr.puts "\n  localvault login YOUR_TOKEN\n"
@@ -25,12 +28,12 @@ module LocalVault
           return
         end
 
-        vault_name = options[:vault] || Config.default_vault
+        vault_name ||= options[:vault] || Config.default_vault
         handle = Config.inventlist_handle
 
         master_key = SessionCache.get(vault_name)
         unless master_key
-          $stderr.puts "Error: Vault '#{vault_name}' is not unlocked. Run: localvault show -v #{vault_name}"
+          $stderr.puts "Error: Vault '#{vault_name}' is not unlocked. Run: localvault unlock -v #{vault_name}"
           return
         end
 
@@ -131,19 +134,22 @@ module LocalVault
         $stderr.puts "Error: #{e.message}"
       end
 
-      desc "rotate", "Re-encrypt a team vault with a new master key (no member changes)"
+      desc "rotate [VAULT]", "Re-encrypt a team vault with a new master key (no member changes)"
       method_option :vault, type: :string, aliases: "-v"
       # Re-key a team vault without adding or removing members.
       #
       # Prompts for a new passphrase, re-encrypts all secrets, and rebuilds
       # all key slots. Useful for periodic key rotation.
-      def rotate
+      #
+      # Accepts the vault name as either a positional argument
+      # (`team rotate intellectaco`) or via --vault/-v.
+      def rotate(vault_name = nil)
         unless Config.token
           $stderr.puts "Error: Not logged in."
           return
         end
 
-        vault_name = options[:vault] || Config.default_vault
+        vault_name ||= options[:vault] || Config.default_vault
         client = ApiClient.new(token: Config.token)
 
         team_data = load_team_data(client, vault_name)
