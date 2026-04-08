@@ -98,28 +98,42 @@ module LocalVault
         store = Store.new(vault_name)
 
         # Partial scope removal
-        if remove_scopes && key_slots[handle].is_a?(Hash) && key_slots[handle]["scopes"].is_a?(Array)
-          remaining = key_slots[handle]["scopes"] - remove_scopes
+        if remove_scopes
+          slot = key_slots[handle]
+          slot_scopes = slot.is_a?(Hash) ? slot["scopes"] : nil
+
+          unless slot_scopes.is_a?(Array)
+            # Member has full access (nil scopes) — --scope is a user error.
+            # Falling through to full removal here used to silently delete
+            # the member, which is surprising and destructive.
+            $stderr.puts "Error: @#{handle} has full access to '#{vault_name}', not scoped. " \
+                         "Use `localvault remove @#{handle}` without --scope to revoke access."
+            return
+          end
+
+          remaining = slot_scopes - remove_scopes
           if remaining.empty?
             # Last scope removed — remove member entirely
             key_slots.delete(handle)
             $stdout.puts "Removed @#{handle} from vault '#{vault_name}' (last scope removed)."
           else
-            # Rebuild blob with remaining scopes
-            master_key = SessionCache.get(vault_name)
-            if master_key
-              vault = Vault.new(name: vault_name, master_key: master_key)
-              filtered = vault.filter(remaining)
-              member_key = RbNaCl::Random.random_bytes(32)
-              encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)
-              enc_key = KeySlot.create(member_key, key_slots[handle]["pub"])
-              key_slots[handle] = {
-                "pub" => key_slots[handle]["pub"],
-                "enc_key" => enc_key,
-                "scopes" => remaining,
-                "blob" => Base64.strict_encode64(encrypted_blob)
-              }
-            end
+            # Rebuild blob with remaining scopes. Requires the vault to be
+            # unlocked — previously this would silently no-op (print success,
+            # push unchanged slot) when the session cache was empty.
+            master_key = ensure_master_key(vault_name)
+            return unless master_key
+
+            vault = Vault.new(name: vault_name, master_key: master_key)
+            filtered = vault.filter(remaining)
+            member_key = RbNaCl::Random.random_bytes(32)
+            encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)
+            enc_key = KeySlot.create(member_key, slot["pub"])
+            key_slots[handle] = {
+              "pub" => slot["pub"],
+              "enc_key" => enc_key,
+              "scopes" => remaining,
+              "blob" => Base64.strict_encode64(encrypted_blob)
+            }
             $stdout.puts "Removed scope(s) #{remove_scopes.join(", ")} from @#{handle}. Remaining: #{remaining.join(", ")}"
           end
 

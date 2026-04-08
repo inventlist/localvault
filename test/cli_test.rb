@@ -719,6 +719,41 @@ class CLITest < Minitest::Test
     end
   end
 
+  # Regression for audit finding 2 (v1.3.4): reset must validate the new
+  # passphrase BEFORE destroying the existing vault. Previously, an empty
+  # or mismatched passphrase (or Ctrl-C between destroy and prompt) left
+  # the user with a destroyed vault and no way to recover.
+  def test_reset_preserves_vault_on_empty_passphrase
+    vault = create_test_vault("default")
+    vault.set("KEEP_ME", "important_data")
+
+    inputs = ["default", "", ""]
+    stub_reset_inputs(inputs) do
+      _, err = capture_io { LocalVault::CLI.start(%w[reset]) }
+      assert_match(/passphrase cannot be empty/i, err)
+    end
+
+    # Original vault must still exist with its original contents
+    assert LocalVault::Store.new("default").exists?
+    surviving = LocalVault::Vault.open(name: "default", passphrase: test_passphrase)
+    assert_equal "important_data", surviving.get("KEEP_ME")
+  end
+
+  def test_reset_preserves_vault_on_mismatched_passphrase
+    vault = create_test_vault("default")
+    vault.set("KEEP_ME", "important_data")
+
+    inputs = ["default", "first-pass", "second-pass"]
+    stub_reset_inputs(inputs) do
+      _, err = capture_io { LocalVault::CLI.start(%w[reset]) }
+      assert_match(/do not match/i, err)
+    end
+
+    assert LocalVault::Store.new("default").exists?
+    surviving = LocalVault::Vault.open(name: "default", passphrase: test_passphrase)
+    assert_equal "important_data", surviving.get("KEEP_ME")
+  end
+
   # --- exec ---
 
   def test_exec_injects_env_vars

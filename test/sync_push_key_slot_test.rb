@@ -144,6 +144,49 @@ class SyncPushKeySlotTest < Minitest::Test
 
   # ── Push without identity — no key slots ──
 
+  # Regression for audit finding 1 (v1.3.4): sync push must NOT silently
+  # downgrade a team vault to a v1 personal bundle if the preflight pull
+  # fails with a transient error. Previously, any ApiError from pull_vault
+  # caused load_remote_bundle_data to return nil, and push would take the
+  # "no remote, just pack as v1" branch — wiping owner + key_slots.
+  def test_push_refuses_on_transient_pull_failure
+    setup_identity_and_login
+
+    flaky_client = Object.new
+    flaky_client.define_singleton_method(:pull_vault) do |_|
+      raise LocalVault::ApiClient::ApiError.new("Internal server error", status: 500)
+    end
+    push_calls = []
+    flaky_client.define_singleton_method(:push_vault) { |*args| push_calls << args; {} }
+
+    _, err = LocalVault::ApiClient.stub(:new, flaky_client) do
+      capture_io { LocalVault::CLI.start(%w[sync push default]) }
+    end
+
+    assert_match(/cannot verify vault mode|refusing to push|internal server error/i, err)
+    assert_empty push_calls, "push_vault must NOT be called when preflight pull fails"
+  end
+
+  def test_push_still_allows_first_personal_push_on_404
+    # A genuine "no remote yet" (404) should NOT be treated as an error —
+    # this is the common first-push flow for a personal vault.
+    setup_identity_and_login
+
+    first_push_client = Object.new
+    first_push_client.define_singleton_method(:pull_vault) do |_|
+      raise LocalVault::ApiClient::ApiError.new("Not found", status: 404)
+    end
+    push_calls = []
+    first_push_client.define_singleton_method(:push_vault) { |*args| push_calls << args; {} }
+
+    out, = LocalVault::ApiClient.stub(:new, first_push_client) do
+      capture_io { LocalVault::CLI.start(%w[sync push default]) }
+    end
+
+    assert_match(/synced vault/i, out)
+    assert_equal 1, push_calls.size
+  end
+
   def test_push_without_identity_writes_v1_personal
     # No identity set up — personal vault, v1 format
     LocalVault::Config.token = "tok"

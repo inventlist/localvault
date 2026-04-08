@@ -22,8 +22,16 @@ module LocalVault
           return
         end
 
-        # Load remote state to determine vault mode
-        remote_data = load_remote_bundle_data(vault_name)
+        # Load remote state to determine vault mode. MUST distinguish a
+        # genuinely-absent remote (404) from a transient API failure: treating
+        # a 5xx as "no remote" would silently downgrade a team vault to a
+        # personal v1 bundle on the next push.
+        remote_data, load_error = load_remote_bundle_data(vault_name)
+        if load_error
+          $stderr.puts "Error: #{load_error}"
+          $stderr.puts "Refusing to push — cannot verify vault mode. Retry when the server is reachable."
+          return
+        end
         handle = Config.inventlist_handle
 
         if remote_data && remote_data[:owner]
@@ -214,14 +222,25 @@ module LocalVault
       end
 
       # Load the full unpacked remote bundle data (owner, key_slots, etc).
-      # Returns nil if no remote blob exists.
+      # Returns [data, error_message]:
+      #   - [hash, nil] on success
+      #   - [nil,  nil] when there genuinely is no remote bundle (404 / empty)
+      #   - [nil,  msg] on any other failure (transient network, 5xx, bad bundle)
+      #
+      # The caller MUST distinguish these cases — treating a transient error
+      # as "no remote" is a data-corruption bug: sync push would then re-upload
+      # the vault as a v1 personal bundle, silently downgrading a team vault
+      # and wiping its owner + key_slots.
       def load_remote_bundle_data(vault_name)
         client = ApiClient.new(token: Config.token)
         blob = client.pull_vault(vault_name)
-        return nil unless blob.is_a?(String) && !blob.empty?
-        SyncBundle.unpack(blob)
-      rescue ApiClient::ApiError, SyncBundle::UnpackError
-        nil
+        return [nil, nil] unless blob.is_a?(String) && !blob.empty?
+        [SyncBundle.unpack(blob), nil]
+      rescue ApiClient::ApiError => e
+        return [nil, nil] if e.status == 404
+        [nil, "Could not load remote bundle for '#{vault_name}': #{e.message}"]
+      rescue SyncBundle::UnpackError => e
+        [nil, "Could not parse remote bundle for '#{vault_name}': #{e.message}"]
       end
 
       # Load key_slots from the last pushed blob (if any).

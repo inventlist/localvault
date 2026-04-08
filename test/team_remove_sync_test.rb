@@ -208,6 +208,65 @@ class TeamRemoveSyncTest < Minitest::Test
     end
   end
 
+  # ── Audit regression tests (v1.3.4) ──
+
+  # Finding 3a: `--scope` on a full-access (nil scopes) member used to fall
+  # through to full removal. It now errors with a clear message instead of
+  # silently deleting the member.
+  def test_remove_scope_errors_on_full_access_member
+    blob = build_blob_with_slots({
+      "alice" => slot_for(LocalVault::Identity.public_key),
+      "bob"   => slot_for(@bob_pub) # nil scopes → full access
+    })
+    @fake_client.set_pull_response(blob)
+
+    _, err = LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["remove", "@bob", "--vault", "production", "--scope", "STRIPE_KEY"]) }
+    end
+
+    assert_match(/has full access|not scoped/i, err)
+    # Must NOT have pushed — @bob should remain in the vault
+    assert_nil @fake_client.calls.find { |c| c[:method] == :push_vault }
+  end
+
+  # Finding 3b: `--scope` on a locked vault used to print success and push
+  # the UNCHANGED slot. It now auto-prompts for the passphrase (via
+  # ensure_master_key) and rebuilds the blob correctly.
+  def test_remove_scope_auto_prompts_when_vault_locked
+    # Give bob scoped access first
+    bob_scoped_slot = {
+      "pub" => @bob_pub,
+      "enc_key" => LocalVault::KeySlot.create(RbNaCl::Random.random_bytes(32), @bob_pub),
+      "scopes" => ["STRIPE_KEY", "WEBHOOK_SECRET"],
+      "blob" => Base64.strict_encode64("dummy")
+    }
+    blob = build_blob_with_slots({
+      "alice" => slot_for(LocalVault::Identity.public_key),
+      "bob"   => bob_scoped_slot
+    })
+    @fake_client.set_pull_response(blob)
+
+    LocalVault::SessionCache.clear("production")
+    original = LocalVault::CLI.instance_method(:prompt_passphrase)
+    LocalVault::CLI.no_commands do
+      LocalVault::CLI.send(:define_method, :prompt_passphrase) { |_msg = ""| "test-pass" }
+    end
+    begin
+      out, = LocalVault::ApiClient.stub(:new, @fake_client) do
+        capture_io { LocalVault::CLI.start(["remove", "@bob", "--vault", "production", "--scope", "STRIPE_KEY"]) }
+      end
+      assert_match(/removed scope/i, out)
+    ensure
+      LocalVault::CLI.no_commands do
+        LocalVault::CLI.send(:define_method, :prompt_passphrase, original)
+      end
+    end
+
+    # Verify the pushed blob actually has the updated scopes
+    pushed = JSON.parse(last_pushed_blob)
+    assert_equal ["WEBHOOK_SECRET"], pushed["key_slots"]["bob"]["scopes"]
+  end
+
   # ── Backward-compat: `team remove` still works ──
 
   def test_team_remove_subcommand_still_works

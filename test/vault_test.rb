@@ -158,6 +158,35 @@ class VaultTest < Minitest::Test
     assert_equal "postgres://localhost", vault.get("platepose.DB")
   end
 
+  # Regression for audit finding 4 (v1.3.4): Vault#set must NOT silently
+  # replace an existing group (nested hash) with a scalar. Previously,
+  # `set("platepose", "oops")` on a vault containing platepose.DB/KEY
+  # would clobber the whole group and lose every nested secret under it.
+  def test_set_refuses_to_replace_group_with_scalar
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("platepose.DB",  "postgres://localhost")
+    vault.set("platepose.KEY", "secret")
+
+    error = assert_raises(RuntimeError) { vault.set("platepose", "oops") }
+    assert_match(/group containing 2 secret/i, error.message)
+
+    # Original group untouched
+    assert_equal "postgres://localhost", vault.get("platepose.DB")
+    assert_equal "secret",               vault.get("platepose.KEY")
+  end
+
+  def test_merge_refuses_to_replace_group_with_scalar
+    vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
+    vault.set("app.DB",    "postgres://localhost")
+    vault.set("app.TOKEN", "secret")
+
+    error = assert_raises(RuntimeError) { vault.merge({ "app" => "oops" }) }
+    assert_match(/group containing 2 secret/i, error.message)
+
+    assert_equal "postgres://localhost", vault.get("app.DB")
+    assert_equal "secret",               vault.get("app.TOKEN")
+  end
+
   def test_get_nested_returns_nil_for_missing_group
     vault = LocalVault::Vault.create!(name: "test", master_key: @master_key, salt: @salt)
     assert_nil vault.get("nogroup.KEY")

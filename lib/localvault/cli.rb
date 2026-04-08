@@ -405,8 +405,9 @@ module LocalVault
         return
       end
 
-      store.destroy!
-
+      # Gather + validate the new passphrase BEFORE destroying the existing
+      # vault. If the user enters empty / mismatched / interrupts, we abort
+      # without touching anything on disk.
       passphrase = prompt_passphrase("New passphrase: ")
       if passphrase.empty?
         abort_with "Passphrase cannot be empty"
@@ -419,6 +420,8 @@ module LocalVault
         return
       end
 
+      # All inputs validated — safe to destroy + recreate.
+      store.destroy!
       salt = Crypto.generate_salt
       master_key = Crypto.derive_master_key(passphrase, salt)
       Vault.create!(name: vault_name, master_key: master_key, salt: salt)

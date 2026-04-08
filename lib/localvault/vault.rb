@@ -64,7 +64,8 @@ module LocalVault
     # @param value [String] the secret value
     # @return [String] the stored value
     # @raise [InvalidKeyName] when key contains invalid characters
-    # @raise [RuntimeError] when a scalar key is used as a group
+    # @raise [RuntimeError] when a scalar key is used as a group, or when a
+    #   scalar is being assigned to an existing group name
     def set(key, value)
       validate_key!(key)
       secrets = all
@@ -74,6 +75,15 @@ module LocalVault
         raise "#{group} is a scalar value, not a group" unless secrets[group].is_a?(Hash)
         secrets[group][subkey] = value
       else
+        # Refuse to silently clobber an existing group with a scalar. This
+        # used to succeed: set("app", "oops") on a vault containing
+        # {"app" => {"DB" => ...}} would replace the whole group and lose
+        # every nested secret under it.
+        if secrets[key].is_a?(Hash)
+          raise "'#{key}' is a group containing #{secrets[key].size} secret(s), " \
+                "not a scalar. Use `localvault delete #{key}` first if you " \
+                "really want to replace the whole group."
+        end
         secrets[key] = value
       end
       write_secrets(secrets)
@@ -283,7 +293,8 @@ module LocalVault
     # @param hash [Hash] key-value pairs to merge into the vault
     # @return [void]
     # @raise [InvalidKeyName] when any key contains invalid characters
-    # @raise [RuntimeError] when a scalar key is used as a group
+    # @raise [RuntimeError] when a scalar key is used as a group, or when a
+    #   scalar is being assigned to an existing group name
     def merge(hash)
       secrets = all
       hash.each do |k, v|
@@ -303,6 +314,13 @@ module LocalVault
             raise "#{group} is a scalar value, not a group" unless secrets[group].is_a?(Hash)
             secrets[group][subkey] = v.to_s
           else
+            # Same guard as Vault#set: don't silently clobber a group with
+            # a scalar. This protects bulk `import` and `receive` flows.
+            if secrets[k].is_a?(Hash)
+              raise "'#{k}' is a group containing #{secrets[k].size} secret(s), " \
+                    "not a scalar. Delete the group first if you really want " \
+                    "to replace it with a scalar."
+            end
             secrets[k] = v.to_s
           end
         end
