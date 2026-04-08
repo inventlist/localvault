@@ -59,6 +59,12 @@ module LocalVault
       shell.say "  localvault install-mcp        Configure MCP server in your AI tool"
       shell.say "  localvault mcp                Start MCP server (stdio)"
       shell.say ""
+      shell.say "LEGACY SHARING  (pre-v1.2 direct share, still works as fallback)"
+      shell.say "  localvault keygen             Generate X25519 keypair (same as `keys generate`)"
+      shell.say "  localvault share [VAULT]      Share a vault with a user, team, or crew (one-shot copy)"
+      shell.say "  localvault receive            Fetch and import vaults shared with you"
+      shell.say "  localvault revoke SHARE_ID    Revoke a direct vault share"
+      shell.say ""
       shell.say "OTHER"
       shell.say "  localvault login --status     Show current login status"
       shell.say "  localvault logout             Log out"
@@ -598,19 +604,6 @@ module LocalVault
       $stdout.puts "Logged out#{" @#{handle}" if handle}."
     end
 
-    desc "connect", "Connect to InventList for vault sharing"
-    method_option :token,  required: true, type: :string, desc: "InventList API token"
-    method_option :handle, required: true, type: :string, desc: "Your InventList handle"
-    def connect
-      Config.token              = options[:token]
-      Config.inventlist_handle  = options[:handle]
-      $stdout.puts "Connected as @#{options[:handle]}"
-      $stdout.puts
-      $stdout.puts "Next steps:"
-      $stdout.puts "  localvault keys generate   # generate your X25519 keypair"
-      $stdout.puts "  localvault keys publish    # upload your public key to InventList"
-    end
-
     desc "share [VAULT]", "Share a vault with an InventList user, team, or crew"
     method_option :with, required: true, type: :string,
       desc: "Recipient: @handle, team:HANDLE, or crew:SLUG"
@@ -803,11 +796,8 @@ module LocalVault
       vault_name = options[:vault] || Config.default_vault
       scope_list = options[:scope]
 
-      master_key = SessionCache.get(vault_name)
-      unless master_key
-        $stderr.puts "Error: Vault '#{vault_name}' is not unlocked. Run: localvault show -v #{vault_name}"
-        return
-      end
+      master_key = ensure_master_key(vault_name)
+      return unless master_key
 
       client = ApiClient.new(token: Config.token)
 

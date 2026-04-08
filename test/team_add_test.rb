@@ -98,12 +98,28 @@ class TeamAddTest < Minitest::Test
     assert_match(/keypair|identity|keygen/i, err)
   end
 
-  def test_team_add_fails_if_vault_not_unlocked
+  def test_team_add_auto_prompts_when_vault_not_unlocked
+    # v1.3.3+: add no longer errors when the vault is locked — it prompts
+    # for the passphrase inline, mirroring the behaviour of team init.
     LocalVault::SessionCache.clear("production")
 
-    _, err = run_team_add("@bob", "production")
+    bob_kp = RbNaCl::PrivateKey.generate
+    bob_pub = Base64.strict_encode64(bob_kp.public_key.to_bytes)
+    @fake_client.set_public_key("bob", bob_pub)
+    @fake_client.set_pull_response(current_blob_with_owner_slot)
 
-    assert_match(/unlock/i, err)
+    original = LocalVault::CLI.instance_method(:prompt_passphrase)
+    LocalVault::CLI.no_commands do
+      LocalVault::CLI.send(:define_method, :prompt_passphrase) { |_msg = ""| "test-pass" }
+    end
+    begin
+      out, = run_team_add("@bob", "production")
+      assert_match(/added.*bob/i, out)
+    ensure
+      LocalVault::CLI.no_commands do
+        LocalVault::CLI.send(:define_method, :prompt_passphrase, original)
+      end
+    end
   end
 
   def test_team_add_fails_if_recipient_has_no_public_key

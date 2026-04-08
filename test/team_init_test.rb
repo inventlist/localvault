@@ -108,13 +108,55 @@ class TeamInitTest < Minitest::Test
     LocalVault::Config.default_vault = "default"
   end
 
-  def test_init_unlocked_error_points_to_unlock
+  def test_init_auto_prompts_for_passphrase_when_not_unlocked
+    # Clear session cache — team init should prompt for passphrase itself
+    # instead of erroring out with "not unlocked".
     LocalVault::SessionCache.clear("production")
+    @fake_client.set_pull_response(personal_v1_blob)
+
+    # Stub prompt_passphrase on CLI::Team (the TeamHelpers method resolves
+    # there because Team is the class currently handling the command).
+    stub_team_prompt(@passphrase) do
+      out, err = run_team_init("production")
+      assert_match(/team vault/, out)
+      assert_empty err
+    end
+
+    # Verify the session cache was populated as a side effect
+    assert_equal @master_key, LocalVault::SessionCache.get("production")
+  end
+
+  def test_init_errors_on_wrong_passphrase
+    LocalVault::SessionCache.clear("production")
+    @fake_client.set_pull_response(personal_v1_blob)
+
+    stub_team_prompt("wrong-pass") do
+      _, err = run_team_init("production")
+      assert_match(/wrong passphrase/i, err)
+    end
+
+    assert_nil LocalVault::SessionCache.get("production")
+  end
+
+  def test_init_errors_when_vault_does_not_exist
+    LocalVault::SessionCache.clear("production")
+    LocalVault::Store.new("production").destroy!
 
     _, err = run_team_init("production")
 
-    assert_match(/not unlocked/i, err)
-    assert_match(/localvault unlock/, err)
+    assert_match(/does not exist/i, err)
+  end
+
+  def stub_team_prompt(value)
+    original = LocalVault::CLI::Team.instance_method(:prompt_passphrase)
+    LocalVault::CLI::Team.no_commands do
+      LocalVault::CLI::Team.send(:define_method, :prompt_passphrase) { |_msg = ""| value }
+    end
+    yield
+  ensure
+    LocalVault::CLI::Team.no_commands do
+      LocalVault::CLI::Team.send(:define_method, :prompt_passphrase, original)
+    end
   end
 
   def test_init_preserves_existing_v2_members

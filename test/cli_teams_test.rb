@@ -46,23 +46,6 @@ class CLITeamsTest < Minitest::Test
     teardown_test_home
   end
 
-  # ── connect ────────────────────────────────────────────────────
-
-  def test_connect_stores_token_and_handle
-    cli = LocalVault::CLI.new([], { token: "tok123", handle: "alice" }, {})
-    out = capture_io { cli.connect }.first
-    assert_equal "tok123", LocalVault::Config.token
-    assert_equal "alice",  LocalVault::Config.inventlist_handle
-    assert_includes out, "Connected as @alice"
-  end
-
-  def test_connect_shows_next_steps
-    cli = LocalVault::CLI.new([], { token: "t", handle: "h" }, {})
-    out = capture_io { cli.connect }.first
-    assert_includes out, "localvault keys generate"
-    assert_includes out, "localvault keys publish"
-  end
-
   # ── keys generate ──────────────────────────────────────────────
 
   def test_keys_generate_creates_keypair

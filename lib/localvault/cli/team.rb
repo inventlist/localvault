@@ -31,11 +31,8 @@ module LocalVault
         vault_name ||= options[:vault] || Config.default_vault
         handle = Config.inventlist_handle
 
-        master_key = SessionCache.get(vault_name)
-        unless master_key
-          $stderr.puts "Error: Vault '#{vault_name}' is not unlocked. Run: localvault unlock -v #{vault_name}"
-          return
-        end
+        master_key = ensure_master_key(vault_name)
+        return unless master_key
 
         client = ApiClient.new(token: Config.token)
         begin
@@ -171,11 +168,8 @@ module LocalVault
         key_slots = team_data[:key_slots]
         vault_owner = team_data[:owner]
 
-        master_key = SessionCache.get(vault_name)
-        unless master_key
-          $stderr.puts "Error: Vault '#{vault_name}' is not unlocked."
-          return
-        end
+        master_key = ensure_master_key(vault_name)
+        return unless master_key
 
         passphrase = prompt_passphrase("New passphrase for vault '#{vault_name}': ")
         if passphrase.nil? || passphrase.empty?

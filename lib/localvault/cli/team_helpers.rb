@@ -10,6 +10,37 @@ module LocalVault
     module TeamHelpers
       private
 
+      # Return the master key for +vault_name+, prompting for the passphrase
+      # if the vault isn't already cached in the session. Returns +nil+ and
+      # emits an error if the vault doesn't exist or the passphrase is wrong.
+      #
+      # This is what lets team init / rotate / add / remove "just work"
+      # without a separate `localvault unlock` step. Delegates to
+      # +Vault.open+ (the canonical passphrase-to-vault constructor) and
+      # verifies the passphrase by calling +vault.all+ — +Vault.open+ alone
+      # doesn't verify, it just derives the key.
+      def ensure_master_key(vault_name)
+        if (cached = SessionCache.get(vault_name))
+          return cached
+        end
+
+        unless Store.new(vault_name).exists?
+          $stderr.puts "Error: Vault '#{vault_name}' does not exist. Run: localvault init #{vault_name}"
+          return nil
+        end
+
+        passphrase = prompt_passphrase("Passphrase for '#{vault_name}': ")
+        return nil if passphrase.nil? || passphrase.empty?
+
+        vault = Vault.open(name: vault_name, passphrase: passphrase)
+        vault.all # raises Crypto::DecryptionError on wrong passphrase
+        SessionCache.set(vault_name, vault.master_key)
+        vault.master_key
+      rescue Crypto::DecryptionError
+        $stderr.puts "Error: Wrong passphrase for vault '#{vault_name}'."
+        nil
+      end
+
       def load_key_slots(client, vault_name)
         data = load_team_data(client, vault_name)
         data ? data[:key_slots] : nil
@@ -107,11 +138,8 @@ module LocalVault
         key_slots.delete(handle)
 
         if rotate
-          master_key = SessionCache.get(vault_name)
-          unless master_key
-            $stderr.puts "Error: Vault '#{vault_name}' is not unlocked. Run: localvault show -v #{vault_name}"
-            return
-          end
+          master_key = ensure_master_key(vault_name)
+          return unless master_key
 
           # Prompt for new passphrase
           passphrase = prompt_passphrase("New passphrase for vault '#{vault_name}': ")

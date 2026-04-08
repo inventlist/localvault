@@ -32,7 +32,7 @@ module LocalVault
       # Publish your X25519 public key to InventList.
       #
       # Requires a keypair (run +localvault keys generate+ first) and an active
-      # connection (run +localvault connect+ first). Once published, other users
+      # login session (run +localvault login+ first). Once published, other users
       # can share vaults with you.
       def publish
         unless Identity.exists?
@@ -41,7 +41,7 @@ module LocalVault
         end
 
         unless Config.token
-          $stderr.puts "Error: Not connected. Run: localvault connect --token TOKEN --handle HANDLE"
+          $stderr.puts "Error: Not logged in. Run: localvault login"
           return
         end
 
