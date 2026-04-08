@@ -280,9 +280,9 @@ module LocalVault
       $stdout.puts table
     end
 
-    desc "unlock", "Output session token for passphrase-free access"
-    def unlock
-      vault_name = resolve_vault_name
+    desc "unlock [VAULT]", "Cache passphrase for session and output session token"
+    def unlock(vault_name = nil)
+      vault_name ||= resolve_vault_name
       store = Store.new(vault_name)
       unless store.exists?
         abort_with "Vault '#{vault_name}' does not exist. Run: localvault init #{vault_name}"

@@ -473,6 +473,19 @@ class CLITest < Minitest::Test
     end
   end
 
+  def test_unlock_accepts_positional_vault_name
+    create_test_vault("intellectaco")
+    stub_passphrase(test_passphrase) do
+      out, = capture_io { LocalVault::CLI.start(%w[unlock intellectaco]) }
+      assert_match(/export LOCALVAULT_SESSION=/, out)
+
+      token = out.match(/LOCALVAULT_SESSION="([^"]+)"/)[1]
+      decoded = Base64.strict_decode64(token)
+      vault_name, = decoded.split(":", 2)
+      assert_equal "intellectaco", vault_name
+    end
+  end
+
   # --- session caching ---
 
   def test_session_skips_passphrase_prompt
