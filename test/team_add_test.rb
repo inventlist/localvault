@@ -5,7 +5,7 @@ require "yaml"
 require "base64"
 require "json"
 
-# LV-029d: localvault team add @handle -v vault
+# LV-029d: localvault add @handle -v vault (formerly: localvault team add)
 class TeamAddTest < Minitest::Test
   include LocalVault::TestHelper
 
@@ -139,6 +139,78 @@ class TeamAddTest < Minitest::Test
     refute slots.key?("@bob")
   end
 
+  # ── Backward-compat: `team add` still works ──
+
+  def test_team_add_subcommand_still_works
+    bob_kp = RbNaCl::PrivateKey.generate
+    bob_pub = Base64.strict_encode64(bob_kp.public_key.to_bytes)
+    @fake_client.set_public_key("bob", bob_pub)
+    @fake_client.set_pull_response(current_blob_with_owner_slot)
+
+    out, = LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["team", "add", "@bob", "--vault", "production"]) }
+    end
+
+    assert_match(/added.*bob/i, out)
+    slots = JSON.parse(last_pushed_blob)["key_slots"]
+    assert slots.key?("bob")
+  end
+
+  # ── verify (top-level + backward-compat) ──
+
+  def test_verify_reports_published_key
+    bob_kp = RbNaCl::PrivateKey.generate
+    bob_pub = Base64.strict_encode64(bob_kp.public_key.to_bytes)
+    @fake_client.set_public_key("bob", bob_pub)
+
+    out, = LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["verify", "@bob"]) }
+    end
+
+    assert_match(/bob.*public key published/i, out)
+    assert_match(/Fingerprint:/, out)
+  end
+
+  def test_verify_reports_missing_key
+    @fake_client.set_public_key("bob", "")
+
+    _, err = LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["verify", "@bob"]) }
+    end
+
+    assert_match(/no public key/i, err)
+  end
+
+  def test_verify_reports_unknown_handle
+    @fake_client.set_public_key_error("ghost", 404)
+
+    _, err = LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["verify", "@ghost"]) }
+    end
+
+    assert_match(/not found/i, err)
+  end
+
+  def test_verify_requires_login
+    LocalVault::Config.token = nil
+
+    _, err = capture_io { LocalVault::CLI.start(["verify", "@bob"]) }
+
+    assert_match(/not logged in/i, err)
+  end
+
+  def test_team_verify_subcommand_still_works
+    bob_kp = RbNaCl::PrivateKey.generate
+    bob_pub = Base64.strict_encode64(bob_kp.public_key.to_bytes)
+    @fake_client.set_public_key("bob", bob_pub)
+
+    out, = LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["team", "verify", "@bob"]) }
+    end
+
+    assert_match(/bob.*public key published/i, out)
+  end
+
   private
 
   def create_test_vault(name, passphrase)
@@ -165,7 +237,7 @@ class TeamAddTest < Minitest::Test
 
   def run_team_add(handle, vault_name)
     LocalVault::ApiClient.stub(:new, @fake_client) do
-      capture_io { LocalVault::CLI.start(["team", "add", handle, "--vault", vault_name]) }
+      capture_io { LocalVault::CLI.start(["add", handle, "--vault", vault_name]) }
     end
   end
 

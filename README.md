@@ -105,19 +105,25 @@ localvault exec -- rails server
 | `sync status` | Show sync state for all vaults |
 | `config set server URL` | Point at a custom server (default: inventlist.com) |
 
-### Team Sharing (v1.2.0)
+### Team Sharing (v1.3.0)
+
+Vault-level operations live under `team`. Person operations (the `@handle`
+already signals a person) are top-level.
 
 | Command | Description |
 |---------|-------------|
 | `team init` | Convert vault to team vault (sets you as owner, SyncBundle v3) |
-| `team verify @handle` | Check if a user has a published public key (dry-run) |
-| `team add @handle` | Add teammate with full vault access |
-| `team add @handle --scope KEY...` | Add teammate with access to specific keys only |
-| `team remove @handle` | Remove teammate's access |
-| `team remove @handle --scope KEY` | Remove one scoped key (keeps other scopes) |
-| `team remove @handle --rotate` | Full revocation + re-encrypt with new passphrase |
 | `team list` | List vault members |
 | `team rotate` | Re-key vault with new passphrase, keep all members |
+| `verify @handle` | Check if a user has a published public key (dry-run) |
+| `add @handle` | Add teammate with full vault access |
+| `add @handle --scope KEY...` | Add teammate with access to specific keys only |
+| `remove @handle` | Remove teammate's access |
+| `remove @handle --scope KEY` | Remove one scoped key (keeps other scopes) |
+| `remove @handle --rotate` | Full revocation + re-encrypt with new passphrase |
+
+The `team add`, `team remove`, and `team verify` aliases still work for
+backward compatibility but the top-level forms are preferred.
 
 ### Keys
 
@@ -168,13 +174,13 @@ Share vault access with teammates using X25519 asymmetric encryption. The server
 localvault team init -v production
 
 # 2. Verify teammate has a published key
-localvault team verify @alice
+localvault verify @alice
 
 # 3. Add with full access
-localvault team add @alice -v production
+localvault add @alice -v production
 
 # 4. Or scoped — they only see specific keys
-localvault team add @bob -v production --scope STRIPE_KEY WEBHOOK_SECRET
+localvault add @bob -v production --scope STRIPE_KEY WEBHOOK_SECRET
 
 # 5. When Alice pulls, auto-unlocks via her identity key
 # (on Alice's machine)
@@ -190,7 +196,7 @@ localvault sync push production
 localvault team rotate -v production
 
 # 8. Full revocation + re-key
-localvault team remove @alice -v production --rotate
+localvault remove @alice -v production --rotate
 ```
 
 **Prerequisites:** Teammates must have a published public key. `localvault login` does this automatically, or: `localvault keys generate && localvault keys publish`.

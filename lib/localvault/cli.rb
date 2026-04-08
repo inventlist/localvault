@@ -45,9 +45,10 @@ module LocalVault
       shell.say "  localvault sync push [NAME]   Push vault to cloud"
       shell.say "  localvault sync pull [NAME]   Pull vault from cloud"
       shell.say "  localvault sync status        Show sync status"
-      shell.say "  localvault team init          Convert vault to team vault (required before team add)"
-      shell.say "  localvault team add HANDLE    Add teammate (use --scope KEY... for partial access)"
-      shell.say "  localvault team remove HANDLE Remove teammate  (--scope KEY to strip one key, --rotate to re-key)"
+      shell.say "  localvault team init          Convert vault to team vault (required before add)"
+      shell.say "  localvault verify @HANDLE     Check if a person has a published public key"
+      shell.say "  localvault add @HANDLE        Add teammate (use --scope KEY... for partial access)"
+      shell.say "  localvault remove @HANDLE     Remove teammate  (--scope KEY to strip one key, --rotate to re-key)"
       shell.say "  localvault team list          List vault members and their access"
       shell.say "  localvault team rotate        Re-key vault, keep all members"
       shell.say "  localvault keys generate      Generate X25519 identity keypair"
@@ -499,6 +500,9 @@ module LocalVault
 
     # ── Teams / sharing / sync ────────────────────────────────────
 
+    require_relative "cli/team_helpers"
+    include TeamHelpers
+
     require_relative "cli/keys"
     require_relative "cli/team"
     require_relative "cli/sync"
@@ -733,6 +737,240 @@ module LocalVault
       $stdout.puts "Note: @recipient retains any secrets already received."
     rescue ApiClient::ApiError => e
       abort_with e.message
+    end
+
+    # ── Person operations: add / remove / verify ──────────────────
+    # The leading `@` in the handle already signals these act on a person.
+    # Vault-level team operations (init/list/rotate) live under `localvault team`.
+
+    desc "verify HANDLE", "Check if a user has a published public key (for sharing)"
+    # Verify a user's handle and public key status before adding them.
+    #
+    # Checks InventList for the handle and whether they have a published
+    # X25519 public key. Does not modify anything.
+    def verify(handle)
+      unless Config.token
+        $stderr.puts "Error: Not logged in."
+        $stderr.puts "\n  localvault login YOUR_TOKEN\n"
+        $stderr.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
+        return
+      end
+
+      handle = handle.delete_prefix("@")
+      client = ApiClient.new(token: Config.token)
+      result = client.get_public_key(handle)
+      pub_key = result["public_key"]
+
+      if pub_key && !pub_key.empty?
+        fingerprint = pub_key.length > 12 ? "#{pub_key[0..7]}...#{pub_key[-4..]}" : pub_key
+        $stdout.puts "@#{handle} — public key published"
+        $stdout.puts "  Fingerprint: #{fingerprint}"
+        $stdout.puts "  Ready for: localvault add @#{handle} -v VAULT"
+      else
+        $stderr.puts "@#{handle} exists but has no public key published."
+        $stderr.puts "They need to run: localvault login TOKEN"
+      end
+    rescue ApiClient::ApiError => e
+      if e.status == 404
+        $stderr.puts "Error: @#{handle} not found on InventList."
+      else
+        $stderr.puts "Error: #{e.message}"
+      end
+    end
+
+    desc "add HANDLE", "Add a teammate to a synced team vault via key slot"
+    method_option :vault, type: :string, aliases: "-v"
+    method_option :scope, type: :array, desc: "Groups or keys to share (omit for full access)"
+    # Grant a user access to a synced vault by creating a key slot.
+    #
+    # With --scope, creates a per-member encrypted blob containing only the
+    # specified keys. Without --scope, grants full vault access.
+    # Requires the vault to be a team vault (run `localvault team init` first).
+    def add(handle)
+      unless Config.token
+        $stderr.puts "Error: Not logged in."
+        $stderr.puts "\n  localvault login YOUR_TOKEN\n"
+        $stderr.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
+        return
+      end
+
+      unless Identity.exists?
+        $stderr.puts "Error: No keypair found. Run: localvault keygen"
+        return
+      end
+
+      target = handle
+      vault_name = options[:vault] || Config.default_vault
+      scope_list = options[:scope]
+
+      master_key = SessionCache.get(vault_name)
+      unless master_key
+        $stderr.puts "Error: Vault '#{vault_name}' is not unlocked. Run: localvault show -v #{vault_name}"
+        return
+      end
+
+      client = ApiClient.new(token: Config.token)
+
+      # Load existing bundle — must be a team vault (v3)
+      existing_blob = client.pull_vault(vault_name) rescue nil
+      unless existing_blob.is_a?(String) && !existing_blob.empty?
+        $stderr.puts "Error: Vault '#{vault_name}' is not a team vault. Run: localvault team init -v #{vault_name}"
+        return
+      end
+
+      data = SyncBundle.unpack(existing_blob)
+      unless data[:owner]
+        $stderr.puts "Error: Vault '#{vault_name}' is not a team vault. Run: localvault team init -v #{vault_name}"
+        return
+      end
+
+      unless data[:owner] == Config.inventlist_handle
+        $stderr.puts "Error: Only the vault owner (@#{data[:owner]}) can manage team access."
+        return
+      end
+
+      key_slots = data[:key_slots].is_a?(Hash) ? data[:key_slots] : {}
+
+      # Resolve recipients — single @handle, team:HANDLE, or crew:SLUG
+      recipients = resolve_add_recipients(client, target)
+      if recipients.empty?
+        $stderr.puts "Error: No recipients with public keys found for '#{target}'"
+        return
+      end
+
+      added = 0
+      recipients.each do |member_handle, pub_key|
+        next if member_handle == Config.inventlist_handle  # skip self
+
+        # Skip if already has full access
+        if key_slots.key?(member_handle) && key_slots[member_handle].is_a?(Hash) && key_slots[member_handle]["scopes"].nil?
+          $stdout.puts "@#{member_handle} already has full vault access." if scope_list
+          next
+        end
+
+        if scope_list
+          existing_scopes = key_slots.dig(member_handle, "scopes") || []
+          merged_scopes = (existing_scopes + scope_list).uniq
+
+          vault = Vault.new(name: vault_name, master_key: master_key)
+          filtered = vault.filter(merged_scopes)
+
+          member_key = RbNaCl::Random.random_bytes(32)
+          encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)
+
+          begin
+            enc_key = KeySlot.create(member_key, pub_key)
+          rescue ArgumentError, KeySlot::DecryptionError => e
+            $stderr.puts "Error: @#{member_handle}'s public key is invalid: #{e.message}"
+            next
+          end
+
+          key_slots[member_handle] = {
+            "pub" => pub_key, "enc_key" => enc_key,
+            "scopes" => merged_scopes,
+            "blob" => Base64.strict_encode64(encrypted_blob)
+          }
+        else
+          begin
+            enc_key = KeySlot.create(master_key, pub_key)
+          rescue ArgumentError, KeySlot::DecryptionError => e
+            $stderr.puts "Error: @#{member_handle}'s public key is invalid: #{e.message}"
+            next
+          end
+
+          key_slots[member_handle] = { "pub" => pub_key, "enc_key" => enc_key, "scopes" => nil, "blob" => nil }
+        end
+        added += 1
+      end
+
+      if added == 0
+        $stdout.puts "No new members added."
+        return
+      end
+
+      store = Store.new(vault_name)
+      blob = SyncBundle.pack_v3(store, owner: data[:owner], key_slots: key_slots)
+      client.push_vault(vault_name, blob)
+
+      if recipients.size == 1
+        h = recipients.first[0]
+        if scope_list
+          $stdout.puts "Added @#{h} to vault '#{vault_name}' (scopes: #{key_slots[h]["scopes"].join(", ")})."
+        else
+          $stdout.puts "Added @#{h} to vault '#{vault_name}'."
+        end
+      else
+        $stdout.puts "Added #{added} member(s) to vault '#{vault_name}'."
+      end
+    rescue ApiClient::ApiError => e
+      if e.status == 404
+        $stderr.puts "Error: @#{handle} not found or has no public key."
+      else
+        $stderr.puts "Error: #{e.message}"
+      end
+    rescue SyncBundle::UnpackError => e
+      $stderr.puts "Error: #{e.message}"
+    end
+
+    desc "remove HANDLE", "Remove a person's access to a vault"
+    method_option :vault, type: :string, aliases: "-v"
+    method_option :rotate, type: :boolean, default: false, desc: "Re-encrypt vault with new master key (full revocation)"
+    method_option :scope, type: :array, desc: "Remove specific scopes only (keeps other scopes)"
+    # Remove a user's access to a vault.
+    #
+    # Removes the user's key slot and pushes the updated bundle. With +--rotate+,
+    # re-encrypts the vault with a new master key and recreates all remaining
+    # key slots for full cryptographic revocation. Falls back to revoking a
+    # direct share if no key slots exist.
+    def remove(handle)
+      unless Config.token
+        $stderr.puts "Error: Not logged in."
+        $stderr.puts
+        $stderr.puts "  localvault login YOUR_TOKEN"
+        $stderr.puts
+        $stderr.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
+        $stderr.puts "New to InventList? Sign up free at https://inventlist.com"
+        $stderr.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
+        return
+      end
+
+      handle = handle.delete_prefix("@")
+      vault_name = options[:vault] || Config.default_vault
+      client = ApiClient.new(token: Config.token)
+
+      # Try sync-based key slot removal first
+      team_data = load_team_data(client, vault_name)
+      if team_data && team_data[:key_slots] && !team_data[:key_slots].empty?
+        # Must be a v3 team vault with owner
+        unless team_data[:owner]
+          $stderr.puts "Error: Vault '#{vault_name}' is not a team vault. Run: localvault team init -v #{vault_name}"
+          return
+        end
+        unless team_data[:owner] == Config.inventlist_handle
+          $stderr.puts "Error: Only the vault owner (@#{team_data[:owner]}) can manage team access."
+          return
+        end
+        remove_key_slot(handle, vault_name, team_data[:key_slots], client,
+                        rotate: options[:rotate], remove_scopes: options[:scope],
+                        owner: team_data[:owner])
+        return
+      end
+
+      # Fall back to direct share revocation
+      result = client.sent_shares(vault_name: vault_name)
+      share = (result["shares"] || []).find do |s|
+        s["recipient_handle"] == handle && s["status"] != "revoked"
+      end
+
+      unless share
+        $stderr.puts "Error: No active share found for @#{handle}."
+        return
+      end
+
+      client.revoke_share(share["id"])
+      $stdout.puts "Removed @#{handle} from vault '#{vault_name}'."
+    rescue ApiClient::ApiError => e
+      $stderr.puts "Error: #{e.message}"
     end
 
     desc "import FILE", "Bulk-import secrets from a .env, .json, or .yml file"

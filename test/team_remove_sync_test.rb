@@ -5,7 +5,7 @@ require "yaml"
 require "base64"
 require "json"
 
-# LV-030: localvault team remove @handle -v vault (sync-based)
+# LV-030: localvault remove @handle -v vault (sync-based, formerly: localvault team remove)
 class TeamRemoveSyncTest < Minitest::Test
   include LocalVault::TestHelper
 
@@ -131,10 +131,7 @@ class TeamRemoveSyncTest < Minitest::Test
     })
     @fake_client.set_pull_response(blob)
 
-    original = LocalVault::CLI::Team.instance_method(:prompt_passphrase)
-    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase) { |_msg = ""| "newpass" }
     _, err = run_team_remove_rotate("@bob", "production")
-    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase, original)
 
     assert_match(/only.*owner/i, err)
     assert_nil @fake_client.calls.find { |c| c[:method] == :push_vault }, "Non-owner should not push"
@@ -160,7 +157,7 @@ class TeamRemoveSyncTest < Minitest::Test
   def test_remove_requires_login
     LocalVault::Config.token = nil
 
-    _, err = capture_io { LocalVault::CLI.start(["team", "remove", "@bob", "--vault", "production"]) }
+    _, err = capture_io { LocalVault::CLI.start(["remove", "@bob", "--vault", "production"]) }
 
     assert_match(/not connected|not logged/i, err)
   end
@@ -211,6 +208,24 @@ class TeamRemoveSyncTest < Minitest::Test
     end
   end
 
+  # ── Backward-compat: `team remove` still works ──
+
+  def test_team_remove_subcommand_still_works
+    blob = build_blob_with_slots({
+      "alice" => slot_for(LocalVault::Identity.public_key),
+      "bob"   => slot_for(@bob_pub)
+    })
+    @fake_client.set_pull_response(blob)
+
+    out, = LocalVault::ApiClient.stub(:new, @fake_client) do
+      capture_io { LocalVault::CLI.start(["team", "remove", "@bob", "--vault", "production"]) }
+    end
+
+    assert_match(/removed.*bob/i, out)
+    slots = JSON.parse(last_pushed_blob)["key_slots"]
+    refute slots.key?("bob")
+  end
+
   def test_rotate_preserves_remaining_members_slots
     carol_kp = RbNaCl::PrivateKey.generate
     carol_pub = Base64.strict_encode64(carol_kp.public_key.to_bytes)
@@ -254,19 +269,26 @@ class TeamRemoveSyncTest < Minitest::Test
 
   def run_team_remove(handle, vault_name)
     LocalVault::ApiClient.stub(:new, @fake_client) do
-      capture_io { LocalVault::CLI.start(["team", "remove", handle, "--vault", vault_name]) }
+      capture_io { LocalVault::CLI.start(["remove", handle, "--vault", vault_name]) }
     end
   end
 
   def run_team_remove_rotate(handle, vault_name)
-    # Stub passphrase prompt to return "newpass"
-    original = LocalVault::CLI::Team.instance_method(:prompt_passphrase)
-    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase) { |_msg = ""| "newpass" }
+    # Stub passphrase prompt to return "newpass" — `remove` is now a top-level
+    # CLI command, so the prompt method lives on LocalVault::CLI. Wrap the
+    # define_method in `no_commands` so Thor doesn't try to register the stub
+    # as a CLI command.
+    original = LocalVault::CLI.instance_method(:prompt_passphrase)
+    LocalVault::CLI.no_commands do
+      LocalVault::CLI.send(:define_method, :prompt_passphrase) { |_msg = ""| "newpass" }
+    end
     LocalVault::ApiClient.stub(:new, @fake_client) do
-      capture_io { LocalVault::CLI.start(["team", "remove", handle, "--vault", vault_name, "--rotate"]) }
+      capture_io { LocalVault::CLI.start(["remove", handle, "--vault", vault_name, "--rotate"]) }
     end
   ensure
-    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase, original)
+    LocalVault::CLI.no_commands do
+      LocalVault::CLI.send(:define_method, :prompt_passphrase, original)
+    end
   end
 
   def last_pushed_blob
