@@ -42,18 +42,41 @@ module LocalVault
 
     # Pack a team vault — v3 format with owner, key_slots, and per-member blobs.
     #
+    # Reads +store.meta_path+ and +store.read_encrypted+ off disk. For flows
+    # that need to build a bundle from in-memory bytes without touching disk
+    # first (e.g. transactional rotate), use +pack_v3_bytes+.
+    #
     # @param store [Store] the vault store to pack
     # @param owner [String] the owner's InventList handle
     # @param key_slots [Hash] per-user key slot data
     # @return [String] JSON string ready for upload
     def self.pack_v3(store, owner:, key_slots: {})
-      meta_content    = File.read(store.meta_path)
-      secrets_content = store.read_encrypted || ""
+      pack_v3_bytes(
+        meta_bytes:    File.read(store.meta_path),
+        secrets_bytes: store.read_encrypted || "",
+        owner:         owner,
+        key_slots:     key_slots
+      )
+    end
+
+    # Pack a v3 team bundle from raw in-memory bytes without touching disk.
+    #
+    # Used by transactional rotate flows that need to push the new bundle to
+    # the server BEFORE committing the rotated secrets + meta to local disk —
+    # if the push fails, nothing on disk changes, so the user can retry
+    # without being left with a locally-rotated but remotely-stale vault.
+    #
+    # @param meta_bytes [String] raw meta YAML bytes (same shape as +store.meta_path+ contents)
+    # @param secrets_bytes [String] raw encrypted secrets bytes
+    # @param owner [String] the owner's InventList handle
+    # @param key_slots [Hash] per-user key slot data
+    # @return [String] JSON string ready for upload
+    def self.pack_v3_bytes(meta_bytes:, secrets_bytes:, owner:, key_slots: {})
       JSON.generate(
         "version"   => 3,
         "owner"     => owner,
-        "meta"      => Base64.strict_encode64(meta_content),
-        "secrets"   => Base64.strict_encode64(secrets_content),
+        "meta"      => Base64.strict_encode64(meta_bytes),
+        "secrets"   => Base64.strict_encode64(secrets_bytes),
         "key_slots" => key_slots
       )
     end

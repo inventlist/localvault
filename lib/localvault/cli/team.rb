@@ -177,35 +177,35 @@ module LocalVault
           return
         end
 
+        # Decrypt existing secrets with the CURRENT master key. After this
+        # point we must not touch the store until the push has succeeded —
+        # see finding #5 (transactional rotate).
         vault = Vault.new(name: vault_name, master_key: master_key)
         secrets = vault.all
-        store = Store.new(vault_name)
 
         new_salt = Crypto.generate_salt
         new_master_key = Crypto.derive_master_key(passphrase, new_salt)
 
-        store.write_encrypted(Crypto.encrypt(JSON.generate(secrets), new_master_key))
-        store.create_meta!(salt: new_salt)
+        bundle = build_rotated_bundle(
+          secrets:        secrets,
+          key_slots:      key_slots,
+          new_master_key: new_master_key,
+          new_salt:       new_salt,
+          owner:          vault_owner,
+          vault_name:     vault_name,
+          vault:          vault
+        )
 
-        new_slots = {}
-        key_slots.each do |h, slot|
-          next unless slot.is_a?(Hash) && slot["pub"].is_a?(String)
-          if slot["scopes"].is_a?(Array)
-            filtered = vault.filter(slot["scopes"])
-            member_key = RbNaCl::Random.random_bytes(32)
-            encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)
-            new_slots[h] = { "pub" => slot["pub"], "enc_key" => KeySlot.create(member_key, slot["pub"]), "scopes" => slot["scopes"], "blob" => Base64.strict_encode64(encrypted_blob) }
-          else
-            new_slots[h] = { "pub" => slot["pub"], "enc_key" => KeySlot.create(new_master_key, slot["pub"]), "scopes" => nil, "blob" => nil }
-          end
-        end
+        # Push first. If this raises, nothing on local disk has changed, so
+        # the user can safely retry with the same passphrase.
+        client.push_vault(vault_name, bundle[:bundle_json])
 
-        blob = SyncBundle.pack_v3(store, owner: vault_owner, key_slots: new_slots)
-        client.push_vault(vault_name, blob)
+        # Push succeeded — commit locally and update the session cache.
+        commit_rotated_bundle_locally(vault_name, bundle[:new_secrets_bytes], bundle[:new_meta_bytes])
         SessionCache.set(vault_name, new_master_key)
 
         $stdout.puts "Vault '#{vault_name}' re-encrypted with new master key."
-        $stdout.puts "#{new_slots.size} member(s) updated."
+        $stdout.puts "#{bundle[:new_slots].size} member(s) updated."
       rescue ApiClient::ApiError => e
         $stderr.puts "Error: #{e.message}"
       end

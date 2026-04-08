@@ -839,6 +839,12 @@ module LocalVault
         return
       end
 
+      # Decrypt the vault ONCE if we're going to need filtered blobs for
+      # scoped members. Without this, a `team add team:HANDLE --scope KEY`
+      # call against an N-member team re-decrypts the whole vault N times.
+      vault        = scope_list ? Vault.new(name: vault_name, master_key: master_key) : nil
+      all_secrets  = scope_list ? vault.all                                             : nil
+
       added = 0
       recipients.each do |member_handle, pub_key|
         next if member_handle == Config.inventlist_handle  # skip self
@@ -853,8 +859,7 @@ module LocalVault
           existing_scopes = key_slots.dig(member_handle, "scopes") || []
           merged_scopes = (existing_scopes + scope_list).uniq
 
-          vault = Vault.new(name: vault_name, master_key: master_key)
-          filtered = vault.filter(merged_scopes)
+          filtered = vault.filter(merged_scopes, from: all_secrets)
 
           member_key = RbNaCl::Random.random_bytes(32)
           encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)

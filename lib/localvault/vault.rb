@@ -333,13 +333,19 @@ module LocalVault
     # Scopes can be group names (returns entire nested hash) or flat key names.
     # +nil+ means full access (returns all). Empty array means nothing.
     #
+    # Pass +from:+ to avoid re-decrypting when you already have the plaintext
+    # secrets hash (e.g. inside a rotate loop that filters once per member).
+    # Without +from:+, this method calls +all+ on every invocation, which
+    # decrypts the whole vault — expensive when called in a loop.
+    #
     # @param scopes [Array<String>, nil] list of group/key names, or nil for all
+    # @param from [Hash, nil] pre-loaded secrets hash (avoids a re-decrypt)
     # @return [Hash] filtered secrets
-    def filter(scopes)
-      return all if scopes.nil?
+    def filter(scopes, from: nil)
+      secrets = from || all
+      return secrets if scopes.nil?
       return {} if scopes.empty?
 
-      secrets = all
       result = {}
       scopes.each do |scope|
         value = secrets[scope]

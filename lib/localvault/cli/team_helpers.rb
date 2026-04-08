@@ -1,6 +1,8 @@
 require "json"
 require "base64"
 require "securerandom"
+require "yaml"
+require "time"
 
 module LocalVault
   class CLI < Thor
@@ -86,6 +88,90 @@ module LocalVault
         []
       end
 
+      # Build everything a rotate needs in memory, without touching local disk.
+      #
+      # Returns a hash of in-memory bytes and derived state that the caller
+      # can either push to the remote before committing locally
+      # (+pack+ + +client.push_vault+), or discard without side effects if
+      # the user interrupts or the push fails.
+      #
+      # This is the centerpiece of finding #5 (transactional rotate): by
+      # producing everything in memory first, the caller can push + commit
+      # atomically — no half-rotated local state if the network dies.
+      #
+      # It also fixes finding #6 (scoped-sharing inefficiency): the plaintext
+      # secrets are decrypted exactly once and passed into +Vault#filter+
+      # for each scoped member instead of being re-decrypted per member.
+      #
+      # @param secrets [Hash] plaintext secrets hash (from +vault.all+)
+      # @param key_slots [Hash] existing key slots from the remote bundle
+      # @param new_master_key [String] the rotation target master key
+      # @param new_salt [String] raw salt bytes for the new meta.yml
+      # @param owner [String] the owner's InventList handle
+      # @param vault_name [String]
+      # @param vault [Vault] a Vault instance (used only for its +filter+ helper)
+      # @return [Hash] +{ new_slots:, new_secrets_bytes:, new_meta_bytes:, bundle_json: }+
+      def build_rotated_bundle(secrets:, key_slots:, new_master_key:, new_salt:,
+                               owner:, vault_name:, vault:)
+        new_secrets_bytes = Crypto.encrypt(JSON.generate(secrets), new_master_key)
+        new_meta_bytes    = YAML.dump(
+          "name"       => vault_name,
+          "created_at" => Store.new(vault_name).meta&.dig("created_at") || Time.now.utc.iso8601,
+          "version"    => 1,
+          "salt"       => Base64.strict_encode64(new_salt)
+        )
+
+        new_slots = {}
+        key_slots.each do |h, slot|
+          next unless slot.is_a?(Hash) && slot["pub"].is_a?(String)
+          if slot["scopes"].is_a?(Array)
+            # Scoped member — rebuild per-member blob. Pass the already-loaded
+            # plaintext `secrets` into filter so we don't re-decrypt the whole
+            # vault for every scoped member.
+            filtered = vault.filter(slot["scopes"], from: secrets)
+            member_key = RbNaCl::Random.random_bytes(32)
+            encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)
+            new_slots[h] = {
+              "pub" => slot["pub"],
+              "enc_key" => KeySlot.create(member_key, slot["pub"]),
+              "scopes" => slot["scopes"],
+              "blob" => Base64.strict_encode64(encrypted_blob)
+            }
+          else
+            # Full-access member — enc_key wraps the new master key.
+            new_slots[h] = {
+              "pub" => slot["pub"],
+              "enc_key" => KeySlot.create(new_master_key, slot["pub"]),
+              "scopes" => nil,
+              "blob" => nil
+            }
+          end
+        end
+
+        bundle_json = SyncBundle.pack_v3_bytes(
+          meta_bytes:    new_meta_bytes,
+          secrets_bytes: new_secrets_bytes,
+          owner:         owner,
+          key_slots:     new_slots
+        )
+
+        {
+          new_slots:         new_slots,
+          new_secrets_bytes: new_secrets_bytes,
+          new_meta_bytes:    new_meta_bytes,
+          bundle_json:       bundle_json
+        }
+      end
+
+      # Commit a rotated bundle to local disk AFTER the remote push has
+      # succeeded. Writes the new ciphertext + meta.yml atomically.
+      def commit_rotated_bundle_locally(vault_name, new_secrets_bytes, new_meta_bytes)
+        store = Store.new(vault_name)
+        store.write_encrypted(new_secrets_bytes)
+        File.write(store.meta_path, new_meta_bytes)
+        File.chmod(0o600, store.meta_path)
+      end
+
       # Remove a member's key slot, optionally rotating the vault master key.
       # Supports partial scope removal via remove_scopes.
       def remove_key_slot(handle, vault_name, key_slots, client, rotate: false, remove_scopes: nil, owner: nil)
@@ -162,41 +248,32 @@ module LocalVault
             return
           end
 
+          # Decrypt with the CURRENT master key. After this point we must
+          # not touch the store until the push has succeeded — see
+          # finding #5 (transactional rotate).
           vault = Vault.new(name: vault_name, master_key: master_key)
           secrets = vault.all
 
           new_salt = Crypto.generate_salt
           new_master_key = Crypto.derive_master_key(passphrase, new_salt)
 
-          new_json = JSON.generate(secrets)
-          new_encrypted = Crypto.encrypt(new_json, new_master_key)
-          store.write_encrypted(new_encrypted)
-          store.create_meta!(salt: new_salt)
+          bundle = build_rotated_bundle(
+            secrets:        secrets,
+            key_slots:      key_slots, # already has `handle` removed above
+            new_master_key: new_master_key,
+            new_salt:       new_salt,
+            owner:          owner,
+            vault_name:     vault_name,
+            vault:          vault
+          )
 
-          new_slots = {}
-          key_slots.each do |h, slot|
-            next unless slot.is_a?(Hash) && slot["pub"].is_a?(String)
-            if slot["scopes"].is_a?(Array)
-              # Scoped member — rebuild per-member blob
-              filtered = vault.filter(slot["scopes"])
-              member_key = RbNaCl::Random.random_bytes(32)
-              encrypted_blob = Crypto.encrypt(JSON.generate(filtered), member_key)
-              new_slots[h] = {
-                "pub" => slot["pub"],
-                "enc_key" => KeySlot.create(member_key, slot["pub"]),
-                "scopes" => slot["scopes"],
-                "blob" => Base64.strict_encode64(encrypted_blob)
-              }
-            else
-              # Full-access member
-              new_slots[h] = { "pub" => slot["pub"], "enc_key" => KeySlot.create(new_master_key, slot["pub"]), "scopes" => nil, "blob" => nil }
-            end
-          end
+          # Push first. If this raises, nothing on local disk has changed.
+          client.push_vault(vault_name, bundle[:bundle_json])
 
-          blob = SyncBundle.pack_v3(store, owner: owner, key_slots: new_slots)
-          client.push_vault(vault_name, blob)
+          # Push succeeded — commit locally.
+          commit_rotated_bundle_locally(vault_name, bundle[:new_secrets_bytes], bundle[:new_meta_bytes])
 
-          if new_slots.key?(Config.inventlist_handle)
+          if bundle[:new_slots].key?(Config.inventlist_handle)
             SessionCache.set(vault_name, new_master_key)
           else
             SessionCache.clear(vault_name)
