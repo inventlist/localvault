@@ -34,7 +34,7 @@ localvault team init -v production
 # Vault 'production' is now a team vault.
 # Owner: @nauman
 #
-# Next: localvault team add @handle -v production
+# Next: localvault add @handle -v production
 ```
 
 This does three things:

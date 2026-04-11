@@ -73,6 +73,7 @@ The leading `@` in a handle already signals a person operation, so `add`/`remove
 
 | Command | Description |
 |---------|-------------|
+| `localvault dashboard` | Aggregate view: vaults you own (with members + scopes), vaults shared with you, and legacy direct-share counts |
 | `localvault verify @HANDLE` | Check if a person has a published public key (dry-run before adding) |
 | `localvault add @HANDLE` | Add a teammate to a synced team vault via key slot |
 | `localvault add @HANDLE --scope KEY...` | Add teammate with access to specific keys only |

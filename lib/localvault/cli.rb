@@ -48,6 +48,7 @@ module LocalVault
       shell.say "  localvault sync SUBCOMMAND    See `localvault help sync` for full sync reference"
       shell.say ""
       shell.say "TEAM SHARING  (requires localvault login)"
+      shell.say "  localvault dashboard          Aggregate view: owned vaults, vaults shared with you, legacy shares"
       shell.say "  localvault verify @HANDLE     Check if a person has a published public key"
       shell.say "  localvault add @HANDLE        Add teammate (use --scope KEY... for partial access)"
       shell.say "  localvault remove @HANDLE     Remove teammate  (--scope KEY to strip one key, --rotate to re-key)"
@@ -979,6 +980,125 @@ module LocalVault
       $stderr.puts "Error: #{e.message}"
     end
 
+    desc "dashboard", "Show who has access to which vaults, and what's shared with you"
+    long_desc <<~DESC
+      Aggregate view across every vault you can see on InventList. Sections:
+
+      \x05OWNED BY YOU       — team vaults where you are the owner, with all members + their scopes
+      \x05SHARED WITH YOU    — team vaults where someone else is the owner and you're a member
+      \x05LEGACY DIRECT SHARES — pre-v1.2 one-shot direct shares (outgoing + incoming)
+
+      Unlike `team list [VAULT]`, which shows a single vault's members, this
+      gives you one screen that answers: who can see my stuff, and whose
+      stuff can I see.
+    DESC
+    def dashboard
+      unless Config.token
+        $stderr.puts "Error: Not logged in."
+        $stderr.puts "\n  localvault login YOUR_TOKEN\n"
+        $stderr.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
+        return
+      end
+
+      client = ApiClient.new(token: Config.token)
+      my_handle = Config.inventlist_handle
+
+      begin
+        list = client.list_vaults
+      rescue ApiClient::ApiError => e
+        $stderr.puts "Error: #{e.message}"
+        return
+      end
+
+      vaults = list["vaults"] || []
+      owned   = []
+      shared  = []
+      skipped = []
+
+      vaults.each do |v|
+        name = v["name"]
+        next unless name
+
+        begin
+          blob = client.pull_vault(name)
+        rescue ApiClient::ApiError => e
+          skipped << [name, e.message]
+          next
+        end
+
+        next if blob.nil? || blob.empty?
+
+        begin
+          data = SyncBundle.unpack(blob)
+        rescue SyncBundle::UnpackError => e
+          skipped << [name, e.message]
+          next
+        end
+
+        owner = data[:owner] || v["owner_handle"]
+        row = {
+          name:       name,
+          owner:      owner,
+          key_slots:  data[:key_slots] || {},
+          is_team:    !owner.nil?,
+          remote_shared: v["shared"] == true
+        }
+
+        if owner && owner == my_handle
+          owned << row
+        elsif v["shared"] == true || (owner && owner != my_handle)
+          shared << row
+        else
+          # v1 personal vault (no owner) — treat as owned (it's yours)
+          owned << row
+        end
+      end
+
+      # ── OWNED BY YOU ──
+      $stdout.puts
+      $stdout.puts VAULT_STYLE.render("OWNED BY YOU") + "  " + COUNT_STYLE.render("(#{owned.size} vault#{owned.size == 1 ? "" : "s"})")
+      $stdout.puts
+      if owned.empty?
+        $stdout.puts "  " + COUNT_STYLE.render("No vaults owned yet. Create one with `localvault init NAME`.")
+      else
+        owned.sort_by { |r| r[:name] }.each { |row| render_dashboard_vault(row, my_handle: my_handle) }
+      end
+
+      # ── SHARED WITH YOU ──
+      $stdout.puts
+      $stdout.puts VAULT_STYLE.render("SHARED WITH YOU") + "  " + COUNT_STYLE.render("(#{shared.size} vault#{shared.size == 1 ? "" : "s"})")
+      $stdout.puts
+      if shared.empty?
+        $stdout.puts "  " + COUNT_STYLE.render("No vaults shared with you.")
+      else
+        shared.sort_by { |r| r[:name] }.each { |row| render_dashboard_vault(row, my_handle: my_handle) }
+      end
+
+      # ── LEGACY DIRECT SHARES ──
+      sent    = safe_fetch_shares { client.sent_shares }
+      pending = safe_fetch_shares { client.pending_shares }
+      outgoing_count = (sent["shares"] || []).reject { |s| s["status"] == "revoked" }.size
+      pending_count  = (pending["shares"] || []).size
+
+      $stdout.puts
+      $stdout.puts VAULT_STYLE.render("LEGACY DIRECT SHARES") + "  " + COUNT_STYLE.render("(pre-v1.2 fallback)")
+      $stdout.puts "  outgoing: #{outgoing_count}    pending: #{pending_count}"
+      if outgoing_count + pending_count > 0
+        $stdout.puts "  " + COUNT_STYLE.render("Manage with `localvault receive`, `localvault revoke SHARE_ID`.")
+      end
+
+      # ── Skipped ──
+      unless skipped.empty?
+        $stdout.puts
+        $stderr.puts "Note: #{skipped.size} vault(s) could not be loaded:"
+        skipped.each do |name, reason|
+          $stderr.puts "  #{name}: #{reason}"
+        end
+      end
+
+      $stdout.puts
+    end
+
     desc "import FILE", "Bulk-import secrets from a .env, .json, or .yml file"
     long_desc <<~DESC
       Import all secrets from a file into a vault. Supports .env, .json, and .yml.
@@ -1267,6 +1387,63 @@ module LocalVault
         $stdout.puts lipgloss_table(ungrouped.sort.to_h, reveal: reveal)
         $stdout.puts
       end
+    end
+
+    # Render one vault row for `localvault dashboard`, as a Lipgloss table
+    # of its members (handle, access, scopes). Style mirrors `show`'s
+    # render_table — rounded border, purple header, alternating rows.
+    def render_dashboard_vault(row, my_handle:)
+      slots = row[:key_slots]
+      valid = slots.select { |_, v| v.is_a?(Hash) && v["pub"].is_a?(String) }
+
+      count_label = "#{valid.size} member#{valid.size == 1 ? "" : "s"}"
+      owner_label = row[:owner] ? "owner @#{row[:owner]}" : "personal (v1 bundle, no team access)"
+      $stdout.puts "  " + GROUP_STYLE.render(row[:name]) + "  " + COUNT_STYLE.render("#{count_label} · #{owner_label}")
+
+      if !row[:is_team]
+        # v1 personal bundle — no members to list
+        $stdout.puts "  " + COUNT_STYLE.render("No team members. Convert with `localvault team init #{row[:name]}` to share.")
+        $stdout.puts
+        return
+      end
+
+      if valid.empty?
+        $stdout.puts "  " + COUNT_STYLE.render("No members yet. Add someone with `localvault add @HANDLE -v #{row[:name]}`.")
+        $stdout.puts
+        return
+      end
+
+      rows = valid.sort.map do |handle, slot|
+        marker = handle == my_handle ? " (you)" : ""
+        access = slot["scopes"].is_a?(Array) ? "scoped" : "full"
+        scopes = slot["scopes"].is_a?(Array) ? slot["scopes"].join(", ") : "—"
+        ["@#{handle}#{marker}", access, scopes]
+      end
+
+      require "lipgloss"
+      table = Lipgloss::Table.new
+        .headers(["Member", "Access", "Scopes"])
+        .rows(rows)
+        .border(:rounded)
+        .style_func(rows: rows.size, columns: 3) do |row_idx, _col|
+          if row_idx == Lipgloss::Table::HEADER_ROW
+            HEADER_STYLE
+          else
+            row_idx.odd? ? ODD_STYLE : EVEN_STYLE
+          end
+        end
+        .render
+
+      $stdout.puts table
+      $stdout.puts
+    end
+
+    # Fetch shares, swallowing API errors so the dashboard never bails
+    # because the legacy endpoint hiccuped.
+    def safe_fetch_shares
+      yield
+    rescue ApiClient::ApiError
+      { "shares" => [] }
     end
 
     def parse_import_file(file)
