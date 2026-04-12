@@ -227,6 +227,45 @@ class DashboardTest < Minitest::Test
     refute_match(/error/i, out.downcase.gsub("error handling", ""))
   end
 
+  # ── sync status ────────────────────────────────────────────
+
+  def test_dashboard_shows_synced_status_with_date
+    create_local_vault("production")
+    @fake_client.set_vaults([
+      { "name" => "production", "owner_handle" => "alice", "shared" => false,
+        "synced_at" => "2026-04-12T10:00:00Z", "size_bytes" => 4821 }
+    ])
+    @fake_client.set_vault_bundle("production",
+      team_blob_with_slots("production", "alice", { "alice" => slot_for(LocalVault::Identity.public_key) }))
+
+    out, = run_dashboard
+    assert_match(/synced.*2026-04-12/i, out)
+    assert_match(/4\.7 KB/, out)
+  end
+
+  def test_dashboard_shows_remote_only_status
+    # Vault exists on server but NOT locally
+    @fake_client.set_vaults([
+      { "name" => "remote-only-vault", "owner_handle" => "alice", "shared" => false,
+        "synced_at" => "2026-04-10T08:00:00Z" }
+    ])
+    @fake_client.set_vault_bundle("remote-only-vault",
+      team_blob_with_slots_no_store("remote-only-vault", "alice", { "alice" => slot_for(LocalVault::Identity.public_key) }))
+
+    out, = run_dashboard
+    assert_match(/remote only/i, out)
+  end
+
+  def test_dashboard_shows_local_only_status
+    # Vault exists locally but NOT on server
+    create_local_vault("offline-vault")
+    @fake_client.set_vaults([])
+
+    out, = run_dashboard
+    assert_match(/offline-vault/, out)
+    assert_match(/local only/i, out)
+  end
+
   # ── legacy direct shares section ──────────────────────────
 
   def test_dashboard_shows_legacy_direct_shares_counts
@@ -303,6 +342,18 @@ class DashboardTest < Minitest::Test
   def team_blob_with_slots(vault_name, owner, slots)
     store = LocalVault::Store.new(vault_name)
     LocalVault::SyncBundle.pack_v3(store, owner: owner, key_slots: slots)
+  end
+
+  # Build a v3 blob without requiring a local store (for remote-only tests)
+  def team_blob_with_slots_no_store(vault_name, owner, slots)
+    meta_bytes    = YAML.dump("name" => vault_name, "version" => 1, "salt" => Base64.strict_encode64("x" * 16))
+    secrets_bytes = ""
+    LocalVault::SyncBundle.pack_v3_bytes(
+      meta_bytes:    meta_bytes,
+      secrets_bytes: secrets_bytes,
+      owner:         owner,
+      key_slots:     slots
+    )
   end
 end
 

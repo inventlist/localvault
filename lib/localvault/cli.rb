@@ -1011,6 +1011,7 @@ module LocalVault
       end
 
       vaults = list["vaults"] || []
+      local_set = Store.list_vaults.to_set
       owned   = []
       shared  = []
       skipped = []
@@ -1036,12 +1037,20 @@ module LocalVault
         end
 
         owner = data[:owner] || v["owner_handle"]
+        local_exists = local_set.include?(name)
+        sync_status  = local_exists ? "synced" : "remote only"
+        synced_at    = v["synced_at"]&.slice(0, 10) || "—"
+        size_label   = v["size_bytes"] ? "#{(v["size_bytes"].to_f / 1024).round(1)} KB" : nil
+
         row = {
-          name:       name,
-          owner:      owner,
-          key_slots:  data[:key_slots] || {},
-          is_team:    !owner.nil?,
-          remote_shared: v["shared"] == true
+          name:          name,
+          owner:         owner,
+          key_slots:     data[:key_slots] || {},
+          is_team:       !owner.nil?,
+          remote_shared: v["shared"] == true,
+          sync_status:   sync_status,
+          synced_at:     synced_at,
+          size_label:    size_label
         }
 
         if owner && owner == my_handle
@@ -1052,6 +1061,16 @@ module LocalVault
           # v1 personal vault (no owner) — treat as owned (it's yours)
           owned << row
         end
+      end
+
+      # Add local-only vaults (exist on disk but not on InventList)
+      remote_names = vaults.map { |v| v["name"] }.compact.to_set
+      (local_set - remote_names).sort.each do |name|
+        owned << {
+          name: name, owner: nil, key_slots: {}, is_team: false,
+          remote_shared: false, sync_status: "local only",
+          synced_at: "—", size_label: nil
+        }
       end
 
       # ── OWNED BY YOU ──
@@ -1397,11 +1416,21 @@ module LocalVault
       valid = slots.select { |_, v| v.is_a?(Hash) && v["pub"].is_a?(String) }
 
       count_label = "#{valid.size} member#{valid.size == 1 ? "" : "s"}"
-      owner_label = row[:owner] ? "owner @#{row[:owner]}" : "personal (v1 bundle, no team access)"
-      $stdout.puts "  " + GROUP_STYLE.render(row[:name]) + "  " + COUNT_STYLE.render("#{count_label} · #{owner_label}")
+      owner_label = row[:owner] ? "owner @#{row[:owner]}" : "personal"
+
+      # Sync status badge
+      sync_badge = case row[:sync_status]
+                   when "synced"      then "synced #{row[:synced_at]}"
+                   when "remote only" then "remote only"
+                   when "local only"  then "local only — not synced"
+                   else                    row[:sync_status] || "unknown"
+                   end
+      sync_badge += " · #{row[:size_label]}" if row[:size_label]
+
+      $stdout.puts "  " + GROUP_STYLE.render(row[:name]) + "  " +
+                   COUNT_STYLE.render("#{count_label} · #{owner_label} · #{sync_badge}")
 
       if !row[:is_team]
-        # v1 personal bundle — no members to list
         $stdout.puts "  " + COUNT_STYLE.render("No team members. Convert with `localvault team init #{row[:name]}` to share.")
         $stdout.puts
         return
