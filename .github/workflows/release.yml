@@ -62,13 +62,22 @@ jobs:
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/inventlist/homebrew-tap.git" tap
           cd tap
 
+          # Skip if the tap already points at this version (manual push or re-run)
+          if grep -q "refs/tags/${GITHUB_REF_NAME}.tar.gz" Formula/localvault.rb; then
+            echo "Tap already at ${VERSION} — nothing to do"
+            exit 0
+          fi
+
           sed -i "s|url \".*\"|url \"${URL}\"|" Formula/localvault.rb
           sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/localvault.rb
 
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
           git add Formula/localvault.rb
+
+          # Handle race: someone else may have pushed between our clone and now
           git commit -m "localvault ${VERSION}"
+          git pull --rebase origin main
           git push
 
   smoke-test:
