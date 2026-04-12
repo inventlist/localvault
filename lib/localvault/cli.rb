@@ -1073,49 +1073,53 @@ module LocalVault
         }
       end
 
-      # ── OWNED BY YOU ──
+      # ── Render everything in tables ──
       $stdout.puts
-      $stdout.puts VAULT_STYLE.render("OWNED BY YOU") + "  " + COUNT_STYLE.render("(#{owned.size} vault#{owned.size == 1 ? "" : "s"})")
-      $stdout.puts
-      if owned.empty?
-        $stdout.puts "  " + COUNT_STYLE.render("No vaults owned yet. Create one with `localvault init NAME`.")
-      else
-        owned.sort_by { |r| r[:name] }.each { |row| render_dashboard_vault(row, my_handle: my_handle) }
+
+      # OWNED BY YOU — one table with all vaults and their members
+      unless owned.empty?
+        $stdout.puts VAULT_STYLE.render("OWNED BY YOU")
+        $stdout.puts render_dashboard_table(owned.sort_by { |r| r[:name] }, my_handle: my_handle)
+        $stdout.puts
       end
 
-      # ── SHARED WITH YOU ──
-      $stdout.puts
-      $stdout.puts VAULT_STYLE.render("SHARED WITH YOU") + "  " + COUNT_STYLE.render("(#{shared.size} vault#{shared.size == 1 ? "" : "s"})")
-      $stdout.puts
-      if shared.empty?
-        $stdout.puts "  " + COUNT_STYLE.render("No vaults shared with you.")
-      else
-        shared.sort_by { |r| r[:name] }.each { |row| render_dashboard_vault(row, my_handle: my_handle) }
+      # SHARED WITH YOU
+      unless shared.empty?
+        $stdout.puts VAULT_STYLE.render("SHARED WITH YOU")
+        $stdout.puts render_dashboard_table(shared.sort_by { |r| r[:name] }, my_handle: my_handle)
+        $stdout.puts
       end
 
-      # ── LEGACY DIRECT SHARES ──
+      if owned.empty? && shared.empty?
+        $stdout.puts COUNT_STYLE.render("No vaults found. Create one with `localvault init NAME`.")
+        $stdout.puts
+      end
+
+      # LEGACY DIRECT SHARES — only show if there are any
       sent    = safe_fetch_shares { client.sent_shares }
       pending = safe_fetch_shares { client.pending_shares }
       outgoing_count = (sent["shares"] || []).reject { |s| s["status"] == "revoked" }.size
       pending_count  = (pending["shares"] || []).size
 
-      $stdout.puts
-      $stdout.puts VAULT_STYLE.render("LEGACY DIRECT SHARES") + "  " + COUNT_STYLE.render("(pre-v1.2 fallback)")
-      $stdout.puts "  outgoing: #{outgoing_count}    pending: #{pending_count}"
       if outgoing_count + pending_count > 0
-        $stdout.puts "  " + COUNT_STYLE.render("Manage with `localvault receive`, `localvault revoke SHARE_ID`.")
-      end
-
-      # ── Skipped ──
-      unless skipped.empty?
-        $stdout.puts
-        $stderr.puts "Note: #{skipped.size} vault(s) could not be loaded:"
-        skipped.each do |name, reason|
-          $stderr.puts "  #{name}: #{reason}"
+        $stdout.puts VAULT_STYLE.render("LEGACY DIRECT SHARES")
+        legacy_rows = []
+        (sent["shares"] || []).reject { |s| s["status"] == "revoked" }.each do |s|
+          legacy_rows << [s["vault_name"] || "—", "@#{s["recipient_handle"]}", s["status"], "outgoing"]
         end
+        (pending["shares"] || []).each do |s|
+          legacy_rows << [s["vault_name"] || "—", "@#{s["sender_handle"]}", "pending", "incoming"]
+        end
+        $stdout.puts render_legacy_shares_table(legacy_rows)
+        $stdout.puts
       end
 
-      $stdout.puts
+      # Skipped
+      unless skipped.empty?
+        $stderr.puts COUNT_STYLE.render("#{skipped.size} vault(s) could not be loaded:")
+        skipped.each { |name, reason| $stderr.puts "  #{name}: #{reason}" }
+        $stdout.puts
+      end
     end
 
     desc "import FILE", "Bulk-import secrets from a .env, .json, or .yml file"
@@ -1408,53 +1412,53 @@ module LocalVault
       end
     end
 
-    # Render one vault row for `localvault dashboard`, as a Lipgloss table
-    # of its members (handle, access, scopes). Style mirrors `show`'s
-    # render_table — rounded border, purple header, alternating rows.
-    def render_dashboard_vault(row, my_handle:)
-      slots = row[:key_slots]
-      valid = slots.select { |_, v| v.is_a?(Hash) && v["pub"].is_a?(String) }
-
-      count_label = "#{valid.size} member#{valid.size == 1 ? "" : "s"}"
-      owner_label = row[:owner] ? "owner @#{row[:owner]}" : "personal"
-
-      # Sync status badge
-      sync_badge = case row[:sync_status]
-                   when "synced"      then "synced #{row[:synced_at]}"
-                   when "remote only" then "remote only"
-                   when "local only"  then "local only — not synced"
-                   else                    row[:sync_status] || "unknown"
-                   end
-      sync_badge += " · #{row[:size_label]}" if row[:size_label]
-
-      $stdout.puts "  " + GROUP_STYLE.render(row[:name]) + "  " +
-                   COUNT_STYLE.render("#{count_label} · #{owner_label} · #{sync_badge}")
-
-      if !row[:is_team]
-        $stdout.puts "  " + COUNT_STYLE.render("No team members. Convert with `localvault team init #{row[:name]}` to share.")
-        $stdout.puts
-        return
-      end
-
-      if valid.empty?
-        $stdout.puts "  " + COUNT_STYLE.render("No members yet. Add someone with `localvault add @HANDLE -v #{row[:name]}`.")
-        $stdout.puts
-        return
-      end
-
-      rows = valid.sort.map do |handle, slot|
-        marker = handle == my_handle ? " (you)" : ""
-        access = slot["scopes"].is_a?(Array) ? "scoped" : "full"
-        scopes = slot["scopes"].is_a?(Array) ? slot["scopes"].join(", ") : "—"
-        ["@#{handle}#{marker}", access, scopes]
-      end
-
+    # Render a single Lipgloss table for all vaults in a section (owned / shared).
+    # Each vault contributes rows: the vault itself as a summary row, then one
+    # row per team member. Personal vaults get a single summary row.
+    #
+    # Columns: Vault | Member | Access | Scopes | Sync | Size
+    def render_dashboard_table(vault_rows, my_handle:)
       require "lipgloss"
-      table = Lipgloss::Table.new
-        .headers(["Member", "Access", "Scopes"])
+
+      rows = []
+      vault_rows.each_with_index do |vr, idx|
+        slots = vr[:key_slots]
+        valid = slots.select { |_, v| v.is_a?(Hash) && v["pub"].is_a?(String) }
+
+        sync_label = case vr[:sync_status]
+                     when "synced"      then "synced #{vr[:synced_at]}"
+                     when "remote only" then "remote only"
+                     when "local only"  then "local only"
+                     else                    vr[:sync_status] || "—"
+                     end
+        size_col = vr[:size_label] || "—"
+        owner_col = vr[:owner] ? "@#{vr[:owner]}" : "personal"
+
+        if valid.empty?
+          # Single summary row for personal / empty team vaults
+          rows << [vr[:name], owner_col, "—", "—", sync_label, size_col]
+        else
+          # First member row carries the vault name; subsequent rows leave it blank
+          valid.sort.each_with_index do |(handle, slot), mi|
+            vault_col = mi == 0 ? vr[:name] : ""
+            owner_show = mi == 0 ? owner_col : ""
+            sync_show  = mi == 0 ? sync_label : ""
+            size_show  = mi == 0 ? size_col : ""
+
+            marker = handle == my_handle ? " (you)" : ""
+            access = slot["scopes"].is_a?(Array) ? "scoped" : "full"
+            scopes = slot["scopes"].is_a?(Array) ? slot["scopes"].join(", ") : "—"
+
+            rows << [vault_col, "@#{handle}#{marker}", access, scopes, sync_show, size_show]
+          end
+        end
+      end
+
+      Lipgloss::Table.new
+        .headers(["Vault", "Member", "Access", "Scopes", "Sync", "Size"])
         .rows(rows)
         .border(:rounded)
-        .style_func(rows: rows.size, columns: 3) do |row_idx, _col|
+        .style_func(rows: rows.size, columns: 6) do |row_idx, _col|
           if row_idx == Lipgloss::Table::HEADER_ROW
             HEADER_STYLE
           else
@@ -1462,9 +1466,23 @@ module LocalVault
           end
         end
         .render
+    end
 
-      $stdout.puts table
-      $stdout.puts
+    # Render legacy direct shares as a single table.
+    def render_legacy_shares_table(rows)
+      require "lipgloss"
+      Lipgloss::Table.new
+        .headers(["Vault", "User", "Status", "Direction"])
+        .rows(rows)
+        .border(:rounded)
+        .style_func(rows: rows.size, columns: 4) do |row_idx, _col|
+          if row_idx == Lipgloss::Table::HEADER_ROW
+            HEADER_STYLE
+          else
+            row_idx.odd? ? ODD_STYLE : EVEN_STYLE
+          end
+        end
+        .render
     end
 
     # Fetch shares, swallowing API errors so the dashboard never bails

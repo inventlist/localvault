@@ -94,7 +94,7 @@ class DashboardTest < Minitest::Test
     assert_match(/scoped/i, out)
   end
 
-  def test_dashboard_shows_member_counts
+  def test_dashboard_shows_all_members_in_table
     create_local_vault("production")
     slots = {
       "alice" => slot_for(LocalVault::Identity.public_key),
@@ -106,7 +106,9 @@ class DashboardTest < Minitest::Test
     @fake_client.set_vault_bundle("production", team_blob_with_slots("production", "alice", slots))
 
     out, = run_dashboard
-    assert_match(/2 members?/i, out)
+    # Both members should appear as rows in the table
+    assert_match(/alice.*full/i, out)
+    assert_match(/carol.*full/i, out)
   end
 
   def test_dashboard_handles_multiple_owned_vaults
@@ -268,7 +270,7 @@ class DashboardTest < Minitest::Test
 
   # ── legacy direct shares section ──────────────────────────
 
-  def test_dashboard_shows_legacy_direct_shares_counts
+  def test_dashboard_shows_legacy_direct_shares_in_table
     @fake_client.set_vaults([])
     @fake_client.set_sent_shares([
       { "id" => 1, "recipient_handle" => "bob",   "status" => "accepted" },
@@ -280,8 +282,10 @@ class DashboardTest < Minitest::Test
 
     out, = run_dashboard
     assert_match(/LEGACY DIRECT SHARES/i, out)
-    assert_match(/outgoing.*2/i, out)
-    assert_match(/pending.*1/i, out)
+    # Each share is a row in the table now
+    assert_match(/@bob.*accepted.*outgoing/i, out)
+    assert_match(/@carol.*pending.*outgoing/i, out)
+    assert_match(/@dan.*pending.*incoming/i, out)
   end
 
   private
