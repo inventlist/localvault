@@ -8,6 +8,7 @@ require_relative "localvault/share_crypto"
 require_relative "localvault/key_slot"
 require_relative "localvault/api_client"
 require_relative "localvault/sync_bundle"
+require_relative "localvault/sync_state"
 
 module LocalVault
 end

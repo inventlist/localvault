@@ -132,7 +132,7 @@ class CLISyncTest < Minitest::Test
     out, = stub_api_client(@fake_client) do
       capture_io { LocalVault::CLI.start(%w[sync push]) }
     end
-    assert_match(/Synced vault 'default'/, out)
+    assert_match(/pushed default/, out)
   end
 
   def test_sync_push_uses_named_vault
@@ -178,7 +178,7 @@ class CLISyncTest < Minitest::Test
     out, = stub_api_client(@fake_client) do
       capture_io { LocalVault::CLI.start(%w[sync pull restored]) }
     end
-    assert_match(/Pulled vault 'restored'/, out)
+    assert_match(/pulled restored/, out)
   end
 
   def test_sync_pull_with_force_overwrites_existing
@@ -190,7 +190,7 @@ class CLISyncTest < Minitest::Test
       capture_io { LocalVault::CLI.start(%w[sync pull default --force]) }
     end
     assert_empty err
-    assert_match(/Pulled vault 'default'/, out)
+    assert_match(/pulled default/, out)
   end
 
   def test_sync_pull_404_shows_clean_error

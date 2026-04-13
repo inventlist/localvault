@@ -1,127 +1,125 @@
 require "thor"
 require "fileutils"
+require "digest"
 
 module LocalVault
   class CLI
     class Sync < Thor
-      desc "push [NAME]", "Push a vault to InventList cloud sync"
-      # Push a local vault to InventList cloud sync.
+      desc "all", "Sync all vaults bidirectionally (push local changes, pull remote changes)"
+      method_option :dry_run, type: :boolean, default: false, desc: "Show what would happen without making changes"
+      # Smart bidirectional sync for all vaults.
       #
-      # Packs the vault's meta and encrypted secrets into a SyncBundle and uploads
-      # it. Preserves existing key slots from the remote and bootstraps an owner
-      # slot if the current identity has no slot yet. Defaults to the configured
-      # default vault if no name is given.
-      def push(vault_name = nil)
+      # Uses per-vault .sync_state files (written by push/pull) to track
+      # the last-synced checksum and detect what changed on each side:
+      #
+      # - Local-only vault → push
+      # - Remote-only vault → pull
+      # - Both exist, only local changed → push
+      # - Both exist, only remote changed → pull
+      # - Both exist, neither changed → skip
+      # - Both exist, both changed → CONFLICT (manual resolution)
+      # - Shared vault (not owned by you) → pull-only
+      def all
         return unless logged_in?
 
-        vault_name ||= Config.default_vault
-        store = Store.new(vault_name)
+        client     = ApiClient.new(token: Config.token)
+        my_handle  = Config.inventlist_handle
+        result     = client.list_vaults
+        remote_map = (result["vaults"] || []).each_with_object({}) { |v, h| h[v["name"]] = v }
+        local_set  = Store.list_vaults.to_set
+        all_names  = (remote_map.keys + local_set.to_a).uniq.sort
 
-        unless store.exists?
-          $stderr.puts "Error: Vault '#{vault_name}' does not exist. Run: localvault init #{vault_name}"
+        if all_names.empty?
+          $stdout.puts "No vaults to sync."
           return
         end
 
-        # Load remote state to determine vault mode. MUST distinguish a
-        # genuinely-absent remote (404) from a transient API failure: treating
-        # a 5xx as "no remote" would silently downgrade a team vault to a
-        # personal v1 bundle on the next push.
-        remote_data, load_error = load_remote_bundle_data(vault_name)
-        if load_error
-          $stderr.puts "Error: #{load_error}"
-          $stderr.puts "Refusing to push — cannot verify vault mode. Retry when the server is reachable."
+        plan = all_names.map { |name| classify_vault(name, local_set, remote_map, my_handle) }
+
+        # Print plan
+        max_name   = (["Vault"]  + plan.map { |p| p[:name] }).map(&:length).max
+        max_action = (["Action"] + plan.map { |p| p[:action].to_s }).map(&:length).max
+
+        $stdout.puts
+        $stdout.puts "  #{"Vault".ljust(max_name)}  #{"Action".ljust(max_action)}  Reason"
+        $stdout.puts "  #{"─" * max_name}  #{"─" * max_action}  ──────"
+        plan.each do |p|
+          label = p[:action] == :conflict ? "CONFLICT" : p[:action].to_s
+          $stdout.puts "  #{p[:name].ljust(max_name)}  #{label.ljust(max_action)}  #{p[:reason]}"
+        end
+        $stdout.puts
+
+        if options[:dry_run]
+          $stdout.puts "Dry run — no changes made."
           return
         end
-        handle = Config.inventlist_handle
 
-        if remote_data && remote_data[:owner]
-          # Team vault — check push authorization
-          owner = remote_data[:owner]
-          key_slots = remote_data[:key_slots] || {}
-          has_scoped = key_slots.values.any? { |s| s.is_a?(Hash) && s["scopes"].is_a?(Array) }
-          my_slot = key_slots[handle]
-          am_scoped = my_slot.is_a?(Hash) && my_slot["scopes"].is_a?(Array)
-
-          if am_scoped
-            $stderr.puts "Error: You have scoped access to vault '#{vault_name}'. Only the owner (@#{owner}) can push."
-            return
+        # Execute
+        pushed = pulled = skipped = conflicts = errors = 0
+        plan.each do |entry|
+          case entry[:action]
+          when :push
+            if perform_push(entry[:name], client)
+              pushed += 1
+            else
+              errors += 1
+            end
+          when :pull
+            if perform_pull(entry[:name], client, force: true)
+              pulled += 1
+            else
+              errors += 1
+            end
+          when :skip
+            skipped += 1
+          when :conflict
+            conflicts += 1
           end
-
-          if has_scoped && owner != handle
-            $stderr.puts "Error: Vault '#{vault_name}' has scoped members. Only the owner (@#{owner}) can push."
-            return
-          end
-
-          # Authorized — push as v3, preserve key_slots
-          key_slots = bootstrap_owner_slot(key_slots, store)
-          blob = SyncBundle.pack_v3(store, owner: owner, key_slots: key_slots)
-        else
-          # Personal vault — push as v1
-          blob = SyncBundle.pack(store)
         end
 
-        client = ApiClient.new(token: Config.token)
-        client.push_vault(vault_name, blob)
+        # Summary
+        parts = []
+        parts << "#{pushed} pushed"     if pushed > 0
+        parts << "#{pulled} pulled"     if pulled > 0
+        parts << "#{skipped} up to date" if skipped > 0
+        parts << "#{errors} failed"     if errors > 0
+        parts << "#{conflicts} conflict#{conflicts == 1 ? "" : "s"}" if conflicts > 0
+        $stdout.puts "Summary: #{parts.join(", ")}"
 
-        $stdout.puts "Synced vault '#{vault_name}' (#{blob.bytesize} bytes)"
+        # Conflict guidance
+        if conflicts > 0
+          $stdout.puts
+          plan.select { |p| p[:action] == :conflict }.each do |p|
+            $stderr.puts "  #{p[:name]} — #{p[:reason]}"
+            $stderr.puts "    Resolve with:"
+            $stderr.puts "      localvault sync push #{p[:name]}   (keep local, overwrite remote)"
+            $stderr.puts "      localvault sync pull #{p[:name]} --force  (keep remote, overwrite local)"
+          end
+        end
       rescue ApiClient::ApiError => e
         $stderr.puts "Error: #{e.message}"
+      end
+
+      default_task :all
+
+      desc "push [NAME]", "Push a vault to InventList cloud sync"
+      def push(vault_name = nil)
+        return unless logged_in?
+        vault_name ||= Config.default_vault
+        client = ApiClient.new(token: Config.token)
+        perform_push(vault_name, client)
       end
 
       desc "pull [NAME]", "Pull a vault from InventList cloud sync"
       method_option :force, type: :boolean, default: false, desc: "Overwrite existing local vault"
-      # Pull a vault from InventList cloud sync to the local filesystem.
-      #
-      # Downloads the SyncBundle, writes meta.yml and secrets.enc locally, and
-      # attempts automatic unlock via key slot. Refuses to overwrite an existing
-      # local vault unless +--force+ is passed. Defaults to the configured default
-      # vault if no name is given.
       def pull(vault_name = nil)
         return unless logged_in?
-
         vault_name ||= Config.default_vault
-        store  = Store.new(vault_name)
-
-        if store.exists? && !options[:force]
-          $stderr.puts "Error: Vault '#{vault_name}' already exists locally. Use --force to overwrite."
-          return
-        end
-
         client = ApiClient.new(token: Config.token)
-        blob   = client.pull_vault(vault_name)
-        data   = SyncBundle.unpack(blob, expected_name: vault_name)
-
-        FileUtils.mkdir_p(store.vault_path, mode: 0o700)
-        File.write(store.meta_path, data[:meta])
-        File.chmod(0o600, store.meta_path)
-        if data[:secrets].empty?
-          FileUtils.rm_f(store.secrets_path)
-        else
-          store.write_encrypted(data[:secrets])
-        end
-
-        $stdout.puts "Pulled vault '#{vault_name}'."
-
-        if try_unlock_via_key_slot(vault_name, data[:key_slots])
-          $stdout.puts "Unlocked via your identity key."
-        else
-          $stdout.puts "Unlock it with: localvault unlock -v #{vault_name}"
-        end
-      rescue SyncBundle::UnpackError => e
-        $stderr.puts "Error: #{e.message}"
-      rescue ApiClient::ApiError => e
-        if e.status == 404
-          $stderr.puts "Error: Vault '#{vault_name}' not found in cloud."
-        else
-          $stderr.puts "Error: #{e.message}"
-        end
+        perform_pull(vault_name, client, force: options[:force])
       end
 
       desc "status", "Show sync status for all vaults"
-      # Display sync status for all local and remote vaults.
-      #
-      # Shows a table with vault name, status (synced / remote only / local only),
-      # and last sync timestamp. Compares local vaults against the cloud inventory.
       def status
         return unless logged_in?
 
@@ -165,13 +163,176 @@ module LocalVault
 
       private
 
-      # Try to decrypt via key slot matching the current identity.
-      #
-      # For full-access members (scopes: nil): decrypts enc_key to get the master key.
-      # For scoped members (scopes: [...]): decrypts enc_key to get the per-member key,
-      # then decrypts the per-member blob and writes it as the local vault's secrets.
-      #
-      # On success, caches the key in SessionCache. Returns true/false.
+      # ── Core push logic ──────────────────────────────────────────
+
+      def perform_push(vault_name, client)
+        store = Store.new(vault_name)
+        unless store.exists?
+          $stderr.puts "Error: Vault '#{vault_name}' does not exist. Run: localvault init #{vault_name}"
+          return false
+        end
+
+        remote_data, load_error = load_remote_bundle_data(vault_name)
+        if load_error
+          $stderr.puts "Error: #{load_error}"
+          $stderr.puts "Refusing to push — cannot verify vault mode."
+          return false
+        end
+
+        handle = Config.inventlist_handle
+
+        if remote_data && remote_data[:owner]
+          owner     = remote_data[:owner]
+          key_slots = remote_data[:key_slots] || {}
+          has_scoped = key_slots.values.any? { |s| s.is_a?(Hash) && s["scopes"].is_a?(Array) }
+          my_slot    = key_slots[handle]
+          am_scoped  = my_slot.is_a?(Hash) && my_slot["scopes"].is_a?(Array)
+
+          if am_scoped
+            $stderr.puts "Error: You have scoped access to vault '#{vault_name}'. Only the owner (@#{owner}) can push."
+            return false
+          end
+          if has_scoped && owner != handle
+            $stderr.puts "Error: Vault '#{vault_name}' has scoped members. Only the owner (@#{owner}) can push."
+            return false
+          end
+
+          key_slots = bootstrap_owner_slot(key_slots, store)
+          blob = SyncBundle.pack_v3(store, owner: owner, key_slots: key_slots)
+        else
+          blob = SyncBundle.pack(store)
+        end
+
+        client.push_vault(vault_name, blob)
+
+        # Record sync state
+        SyncState.new(vault_name).write!(
+          checksum: SyncState.local_checksum(store),
+          direction: "push"
+        )
+
+        $stdout.puts "  pushed #{vault_name} (#{blob.bytesize} bytes)"
+        true
+      rescue ApiClient::ApiError => e
+        $stderr.puts "Error pushing '#{vault_name}': #{e.message}"
+        false
+      end
+
+      # ── Core pull logic ──────────────────────────────────────────
+
+      def perform_pull(vault_name, client, force: false)
+        store = Store.new(vault_name)
+        if store.exists? && !force
+          $stderr.puts "Error: Vault '#{vault_name}' already exists locally. Use --force to overwrite."
+          return false
+        end
+
+        blob = client.pull_vault(vault_name)
+        data = SyncBundle.unpack(blob, expected_name: vault_name)
+
+        FileUtils.mkdir_p(store.vault_path, mode: 0o700)
+        File.write(store.meta_path, data[:meta])
+        File.chmod(0o600, store.meta_path)
+        if data[:secrets].empty?
+          FileUtils.rm_f(store.secrets_path)
+        else
+          store.write_encrypted(data[:secrets])
+        end
+
+        # Record sync state
+        SyncState.new(vault_name).write!(
+          checksum: SyncState.local_checksum(store),
+          direction: "pull"
+        )
+
+        $stdout.puts "  pulled #{vault_name}"
+
+        if try_unlock_via_key_slot(vault_name, data[:key_slots])
+          $stdout.puts "  unlocked via identity key"
+        else
+          $stdout.puts "  unlock it with: localvault unlock #{vault_name}"
+        end
+        true
+      rescue SyncBundle::UnpackError => e
+        $stderr.puts "Error pulling '#{vault_name}': #{e.message}"
+        false
+      rescue ApiClient::ApiError => e
+        if e.status == 404
+          $stderr.puts "Error: Vault '#{vault_name}' not found in cloud."
+        else
+          $stderr.puts "Error pulling '#{vault_name}': #{e.message}"
+        end
+        false
+      end
+
+      # ── Classification ───────────────────────────────────────────
+
+      def classify_vault(name, local_set, remote_map, my_handle)
+        l_exists = local_set.include?(name)
+        r_info   = remote_map[name]
+        r_exists = !r_info.nil?
+
+        store      = l_exists ? Store.new(name) : nil
+        ss         = SyncState.new(name)
+        s_exists   = ss.exists?
+        baseline   = ss.last_synced_checksum
+
+        local_checksum  = l_exists && store ? SyncState.local_checksum(store) : nil
+        remote_checksum = r_info&.dig("checksum")
+
+        # Ownership
+        owner_handle = r_info&.dig("owner_handle")
+        is_shared    = r_info&.dig("shared") == true
+        is_read_only = is_shared || (owner_handle && owner_handle != my_handle)
+
+        action, reason = determine_action(
+          l_exists, r_exists, s_exists,
+          local_checksum, remote_checksum, baseline,
+          is_read_only
+        )
+
+        { name: name, action: action, reason: reason }
+      end
+
+      def determine_action(l_exists, r_exists, s_exists,
+                           local_cs, remote_cs, baseline, is_read_only)
+        # Only local
+        if l_exists && !r_exists
+          return is_read_only ? [:skip, "shared vault, local copy only"] : [:push, "local only"]
+        end
+
+        # Only remote
+        return [:pull, "remote only"] if !l_exists && r_exists
+
+        # Neither (shouldn't happen since we iterate union)
+        return [:skip, "no data"] unless l_exists && r_exists
+
+        # Both exist — no baseline (first sync for this vault)
+        unless s_exists
+          if local_cs == remote_cs || (local_cs.nil? && remote_cs.nil?)
+            return [:skip, "already in sync (first check)"]
+          else
+            return [:conflict, "both exist, no sync baseline — cannot determine which side changed"]
+          end
+        end
+
+        # Both exist, have baseline
+        local_changed  = local_cs != baseline
+        remote_changed = remote_cs != baseline
+
+        if !local_changed && !remote_changed
+          [:skip, "up to date"]
+        elsif local_changed && !remote_changed
+          is_read_only ? [:skip, "shared vault (local edits, pull-only)"] : [:push, "local changes"]
+        elsif !local_changed && remote_changed
+          [:pull, "remote changes"]
+        else
+          [:conflict, "both local and remote changed since last sync"]
+        end
+      end
+
+      # ── Helpers ──────────────────────────────────────────────────
+
       def try_unlock_via_key_slot(vault_name, key_slots)
         return false unless key_slots.is_a?(Hash) && !key_slots.empty?
         return false unless Identity.exists?
@@ -185,22 +346,16 @@ module LocalVault
         decrypted_key = KeySlot.decrypt(slot["enc_key"], Identity.private_key_bytes)
 
         if slot["scopes"].is_a?(Array) && slot["blob"].is_a?(String)
-          # Scoped member: decrypt per-member blob and write as local vault
           blob_encrypted = Base64.strict_decode64(slot["blob"])
           filtered_json = Crypto.decrypt(blob_encrypted, decrypted_key)
-          # Verify it's valid JSON
           JSON.parse(filtered_json)
 
-          # Re-encrypt the filtered secrets with the member key as local "master key"
           store = Store.new(vault_name)
           store.write_encrypted(Crypto.encrypt(filtered_json, decrypted_key))
-
           SessionCache.set(vault_name, decrypted_key)
         else
-          # Full-access member: decrypted_key IS the master key
           vault = Vault.new(name: vault_name, master_key: decrypted_key)
-          vault.all  # verify
-
+          vault.all
           SessionCache.set(vault_name, decrypted_key)
         end
         true
@@ -221,16 +376,6 @@ module LocalVault
         false
       end
 
-      # Load the full unpacked remote bundle data (owner, key_slots, etc).
-      # Returns [data, error_message]:
-      #   - [hash, nil] on success
-      #   - [nil,  nil] when there genuinely is no remote bundle (404 / empty)
-      #   - [nil,  msg] on any other failure (transient network, 5xx, bad bundle)
-      #
-      # The caller MUST distinguish these cases — treating a transient error
-      # as "no remote" is a data-corruption bug: sync push would then re-upload
-      # the vault as a v1 personal bundle, silently downgrading a team vault
-      # and wiping its owner + key_slots.
       def load_remote_bundle_data(vault_name)
         client = ApiClient.new(token: Config.token)
         blob = client.pull_vault(vault_name)
@@ -243,8 +388,6 @@ module LocalVault
         [nil, "Could not parse remote bundle for '#{vault_name}': #{e.message}"]
       end
 
-      # Load key_slots from the last pushed blob (if any).
-      # Returns {} if no remote blob or if it's a v1 bundle.
       def load_existing_key_slots(vault_name)
         client = ApiClient.new(token: Config.token)
         blob = client.pull_vault(vault_name)
@@ -255,17 +398,12 @@ module LocalVault
         {}
       end
 
-      # Add the owner's key slot if identity exists and no slot is present.
-      # Requires the vault to be unlockable (needs master key for encryption).
       def bootstrap_owner_slot(key_slots, store)
         return key_slots unless Identity.exists?
         handle = Config.inventlist_handle
         return key_slots unless handle
-
-        # Already has owner slot — don't churn
         return key_slots if key_slots.key?(handle)
 
-        # Need the master key to create the slot — try SessionCache
         master_key = SessionCache.get(store.vault_name)
         return key_slots unless master_key
 

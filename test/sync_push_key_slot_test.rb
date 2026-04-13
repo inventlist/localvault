@@ -183,7 +183,7 @@ class SyncPushKeySlotTest < Minitest::Test
       capture_io { LocalVault::CLI.start(%w[sync push default]) }
     end
 
-    assert_match(/synced vault/i, out)
+    assert_match(/pushed default/i, out)
     assert_equal 1, push_calls.size
   end
 
