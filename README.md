@@ -100,8 +100,10 @@ localvault exec -- rails server
 | `login [TOKEN]` | Log in to InventList — auto-generates X25519 keypair + publishes public key |
 | `login --status` | Show current login status |
 | `logout` | Clear stored credentials |
-| `sync push [NAME]` | Push encrypted vault to cloud |
-| `sync pull [NAME]` | Pull vault from cloud (auto-unlocks if you have a key slot) |
+| `sync` | Sync all vaults bidirectionally (push local, pull remote, detect conflicts) |
+| `sync --dry-run` | Preview what sync would do without making changes |
+| `sync push [NAME]` | Push one vault to cloud |
+| `sync pull [NAME]` | Pull one vault from cloud (auto-unlocks if you have a key slot) |
 | `sync status` | Show sync state for all vaults |
 | `config set server URL` | Point at a custom server (default: inventlist.com) |
 
@@ -147,22 +149,32 @@ All commands accept `--vault NAME` (or `-v NAME`) to target a specific vault. De
 Sync your vaults between machines — same passphrase, no team features needed:
 
 ```bash
-# Machine A: push your vault
-localvault sync push
+# Machine A: push all your vaults at once
+localvault sync
 
-# Machine B: install, login, pull
+# Machine B: install, login, sync
 brew install inventlist/tap/localvault
 localvault login YOUR_TOKEN
-localvault sync pull
-localvault show  # enter your passphrase — same secrets
+localvault sync                # pulls everything, pushes local-only vaults
+localvault show                # enter your passphrase — same secrets
 ```
 
-Check what's synced:
+Or push/pull individual vaults:
 
 ```bash
-localvault sync status
-# default        synced        2 minutes ago
-# production     local only    —
+localvault sync push production    # push one vault
+localvault sync pull production    # pull one vault
+localvault sync status             # check what's synced vs local-only
+```
+
+Preview before syncing:
+
+```bash
+localvault sync --dry-run
+#   Vault         Action    Reason
+#   default       skip      up to date
+#   production    push      local changes
+#   staging       pull      remote changes
 ```
 
 ## Team Sharing

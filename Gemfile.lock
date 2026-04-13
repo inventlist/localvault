@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    localvault (1.6.0)
+    localvault (1.6.1)
       base64 (~> 0.2)
       lipgloss (~> 0.2)
       rbnacl (~> 7.1)

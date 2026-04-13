@@ -62,10 +62,14 @@ The `keys` namespace manages your X25519 keypair. `localvault login` auto-genera
 
 | Command | Description |
 |---------|-------------|
-| `localvault sync push [NAME]` | Push vault to cloud |
-| `localvault sync pull [NAME]` | Pull vault from cloud (auto-unlocks if you have a key slot) |
+| `localvault sync` | Sync all vaults bidirectionally — pushes local changes, pulls remote changes, skips up-to-date, flags conflicts |
+| `localvault sync --dry-run` | Show what would happen without making any changes |
+| `localvault sync push [NAME]` | Push one vault to cloud |
+| `localvault sync pull [NAME]` | Pull one vault from cloud (auto-unlocks if you have a key slot) |
 | `localvault sync pull [NAME] --force` | Overwrite existing local vault |
 | `localvault sync status` | Show local/remote status for all vaults |
+
+`localvault sync` uses per-vault `.sync_state` files to track what was last synced. When both sides change independently, it prints CONFLICT and tells you how to resolve (keep local or keep remote) — it never silently overwrites either side.
 
 ## Team sharing
 

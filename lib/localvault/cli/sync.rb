@@ -165,6 +165,15 @@ module LocalVault
 
       # ── Core push logic ──────────────────────────────────────────
 
+      # Push a single vault to the cloud. Detects team vs personal mode,
+      # checks push authorization, packs the SyncBundle, uploads, and
+      # records the checksum in +.sync_state+ on success.
+      #
+      # Used by both the public +push+ command and the +all+ sync loop.
+      #
+      # @param vault_name [String] vault to push
+      # @param client [ApiClient] authenticated API client
+      # @return [Boolean] true on success, false on any error
       def perform_push(vault_name, client)
         store = Store.new(vault_name)
         unless store.exists?
@@ -220,6 +229,14 @@ module LocalVault
 
       # ── Core pull logic ──────────────────────────────────────────
 
+      # Pull a single vault from the cloud. Downloads the SyncBundle,
+      # writes meta.yml and secrets.enc locally, records +.sync_state+,
+      # and attempts automatic unlock via the user's identity key slot.
+      #
+      # @param vault_name [String] vault to pull
+      # @param client [ApiClient] authenticated API client
+      # @param force [Boolean] overwrite existing local vault (default: false)
+      # @return [Boolean] true on success, false on any error
       def perform_pull(vault_name, client, force: false)
         store = Store.new(vault_name)
         if store.exists? && !force
@@ -267,6 +284,15 @@ module LocalVault
 
       # ── Classification ───────────────────────────────────────────
 
+      # Determine the sync action for a single vault by comparing local,
+      # remote, and baseline state. Returns a hash with +:name+, +:action+
+      # (one of +:push+, +:pull+, +:skip+, +:conflict+), and +:reason+.
+      #
+      # @param name [String] vault name
+      # @param local_set [Set<String>] vaults that exist on disk
+      # @param remote_map [Hash{String => Hash}] remote vault info keyed by name
+      # @param my_handle [String] current user's InventList handle
+      # @return [Hash] +{name:, action:, reason:}+
       def classify_vault(name, local_set, remote_map, my_handle)
         l_exists = local_set.include?(name)
         r_info   = remote_map[name]
@@ -294,6 +320,10 @@ module LocalVault
         { name: name, action: action, reason: reason }
       end
 
+      # Core decision matrix. Compares local/remote existence, checksums,
+      # and the stored baseline to decide: push, pull, skip, or conflict.
+      #
+      # @return [Array(Symbol, String)] +[action, reason]+ tuple
       def determine_action(l_exists, r_exists, s_exists,
                            local_cs, remote_cs, baseline, is_read_only)
         # Only local
