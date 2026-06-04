@@ -17,6 +17,7 @@ module LocalVault
       # - Both exist, only local changed → push
       # - Both exist, only remote changed → pull
       # - Both exist, neither changed → skip
+      # - Both exist, no baseline but secrets identical → adopt (record baseline)
       # - Both exist, both changed → CONFLICT (manual resolution)
       # - Shared vault (not owned by you) → pull-only
       def all
@@ -34,7 +35,7 @@ module LocalVault
           return
         end
 
-        plan = all_names.map { |name| classify_vault(name, local_set, remote_map, my_handle) }
+        plan = all_names.map { |name| classify_vault(name, local_set, remote_map, my_handle, client) }
 
         # Print plan
         max_name   = (["Vault"]  + plan.map { |p| p[:name] }).map(&:length).max
@@ -55,7 +56,7 @@ module LocalVault
         end
 
         # Execute
-        pushed = pulled = skipped = conflicts = errors = 0
+        pushed = pulled = skipped = adopted = conflicts = errors = 0
         plan.each do |entry|
           case entry[:action]
           when :push
@@ -70,6 +71,12 @@ module LocalVault
             else
               errors += 1
             end
+          when :adopt
+            if perform_adopt(entry[:name])
+              adopted += 1
+            else
+              errors += 1
+            end
           when :skip
             skipped += 1
           when :conflict
@@ -79,10 +86,11 @@ module LocalVault
 
         # Summary
         parts = []
-        parts << "#{pushed} pushed"     if pushed > 0
-        parts << "#{pulled} pulled"     if pulled > 0
+        parts << "#{pushed} pushed"      if pushed > 0
+        parts << "#{pulled} pulled"      if pulled > 0
+        parts << "#{adopted} baselined"  if adopted > 0
         parts << "#{skipped} up to date" if skipped > 0
-        parts << "#{errors} failed"     if errors > 0
+        parts << "#{errors} failed"      if errors > 0
         parts << "#{conflicts} conflict#{conflicts == 1 ? "" : "s"}" if conflicts > 0
         $stdout.puts "Summary: #{parts.join(", ")}"
 
@@ -292,8 +300,9 @@ module LocalVault
       # @param local_set [Set<String>] vaults that exist on disk
       # @param remote_map [Hash{String => Hash}] remote vault info keyed by name
       # @param my_handle [String] current user's InventList handle
+      # @param client [ApiClient] authenticated API client (used to hash remote secrets)
       # @return [Hash] +{name:, action:, reason:}+
-      def classify_vault(name, local_set, remote_map, my_handle)
+      def classify_vault(name, local_set, remote_map, my_handle, client)
         l_exists = local_set.include?(name)
         r_info   = remote_map[name]
         r_exists = !r_info.nil?
@@ -303,8 +312,25 @@ module LocalVault
         s_exists   = ss.exists?
         baseline   = ss.last_synced_checksum
 
-        local_checksum  = l_exists && store ? SyncState.local_checksum(store) : nil
-        remote_checksum = r_info&.dig("checksum")
+        local_checksum = l_exists && store ? SyncState.local_checksum(store) : nil
+
+        # The server's list `checksum` hashes the whole sync bundle, which lives
+        # in a different hash space than our baseline and +local_checksum+ (both
+        # SHA256 of the encrypted *secrets* bytes). Comparing across those spaces
+        # never matches, so it would flag every both-exist vault as changed or
+        # conflicting. To compare like-for-like we download the bundle and hash
+        # its secrets bytes — but only when both sides exist, since for local-only
+        # / remote-only vaults the direction is unambiguous and no compare is needed.
+        if l_exists && r_exists
+          begin
+            remote_checksum = remote_secrets_checksum(name, client)
+          rescue SyncBundle::UnpackError
+            # A corrupt/unparseable remote bundle must not be conflated with an
+            # empty vault (both would otherwise yield nil and could falsely
+            # "adopt"). Surface it as a conflict the user can inspect.
+            return { name: name, action: :conflict, reason: "remote bundle unreadable — cannot compare" }
+          end
+        end
 
         # Ownership
         owner_handle = r_info&.dig("owner_handle")
@@ -337,12 +363,14 @@ module LocalVault
         # Neither (shouldn't happen since we iterate union)
         return [:skip, "no data"] unless l_exists && r_exists
 
-        # Both exist — no baseline (first sync for this vault)
+        # Both exist — no baseline (first sync for this vault). Compare the
+        # secrets bytes directly: if they match, the sides are already in sync
+        # and we just record a baseline so future syncs can detect drift.
         unless s_exists
-          if local_cs == remote_cs || (local_cs.nil? && remote_cs.nil?)
-            return [:skip, "already in sync (first check)"]
+          if local_cs == remote_cs
+            return [:adopt, "in sync — recording baseline"]
           else
-            return [:conflict, "both exist, no sync baseline — cannot determine which side changed"]
+            return [:conflict, "both exist, no sync baseline — run 'sync push' or 'sync pull' to resolve"]
           end
         end
 
@@ -362,6 +390,45 @@ module LocalVault
       end
 
       # ── Helpers ──────────────────────────────────────────────────
+
+      # Record a sync baseline for a vault whose local and remote secrets are
+      # already byte-identical, without transferring any data. Lets the next
+      # sync detect drift instead of re-comparing from scratch every time.
+      #
+      # @param vault_name [String] vault to baseline
+      # @return [Boolean] true on success, false on any error
+      def perform_adopt(vault_name)
+        store = Store.new(vault_name)
+        SyncState.new(vault_name).write!(
+          checksum: SyncState.local_checksum(store),
+          direction: "adopt"
+        )
+        $stdout.puts "  baselined #{vault_name} (already in sync)"
+        true
+      rescue StandardError => e
+        $stderr.puts "Error baselining '#{vault_name}': #{e.message}"
+        false
+      end
+
+      # SHA256 of a remote vault's encrypted secrets bytes — the same hash space
+      # as +SyncState.local_checksum+ and the stored baseline, so the two can be
+      # compared directly. Returns nil when the vault has no secrets (empty), is
+      # missing remotely (404), or the bundle can't be parsed.
+      #
+      # @param vault_name [String] vault to fetch
+      # @param client [ApiClient] authenticated API client
+      # @return [String, nil] hex digest of the remote secrets bytes, or nil if empty/missing
+      # @raise [SyncBundle::UnpackError] if the bundle exists but can't be parsed
+      def remote_secrets_checksum(vault_name, client)
+        blob = client.pull_vault(vault_name)
+        return nil unless blob.is_a?(String) && !blob.empty?
+        secrets = SyncBundle.unpack(blob)[:secrets]
+        return nil if secrets.nil? || secrets.empty?
+        Digest::SHA256.hexdigest(secrets)
+      rescue ApiClient::ApiError => e
+        raise unless e.status == 404
+        nil
+      end
 
       def try_unlock_via_key_slot(vault_name, key_slots)
         return false unless key_slots.is_a?(Hash) && !key_slots.empty?

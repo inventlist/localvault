@@ -116,7 +116,11 @@ module LocalVault
         # Fall back to file store if Keychain fails (e.g., in CI or sandboxed env)
         unless success
           file = session_file(vault_name)
-          File.write(file, payload, perm: 0o600)
+          File.write(file, payload)
+          # chmod unconditionally: File.write's perm: only applies on creation,
+          # so an existing looser-mode file would otherwise keep its perms and
+          # leak the master key.
+          File.chmod(0o600, file)
         end
       else
         keychain_delete(vault_name)

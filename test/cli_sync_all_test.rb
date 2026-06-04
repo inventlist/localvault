@@ -105,9 +105,11 @@ class CLISyncAllTest < Minitest::Test
     # Write sync state matching current local state
     LocalVault::SyncState.new("production").write!(checksum: local_cs, direction: "push")
 
+    # Remote bundle holds the same secrets bytes → same secrets-hash as local.
     @fake_client.set_list_response({ "vaults" => [
-      { "name" => "production", "checksum" => local_cs, "shared" => false }
+      { "name" => "production", "checksum" => "ignored-bundle-hash", "shared" => false }
     ] })
+    @fake_client.set_vault_blob("production", build_v1_blob_from_store("production"))
 
     out, = run_sync
     assert_match(/production.*skip.*up to date/i, out)
@@ -123,9 +125,11 @@ class CLISyncAllTest < Minitest::Test
     vault = create_test_vault("production")
     store = LocalVault::Store.new("production")
 
-    # Record baseline before editing
+    # Record baseline before editing, and snapshot the remote bundle so remote
+    # still matches the baseline (only local will diverge).
     baseline = LocalVault::SyncState.local_checksum(store)
     LocalVault::SyncState.new("production").write!(checksum: baseline, direction: "push")
+    @fake_client.set_vault_blob("production", build_v1_blob_from_store("production"))
 
     # Edit a secret locally → local checksum changes
     vault.set("NEW_KEY", "new_value")
@@ -133,7 +137,7 @@ class CLISyncAllTest < Minitest::Test
     refute_equal baseline, new_local_cs
 
     @fake_client.set_list_response({ "vaults" => [
-      { "name" => "production", "checksum" => baseline, "shared" => false }
+      { "name" => "production", "checksum" => "ignored-bundle-hash", "shared" => false }
     ] })
 
     out, = run_sync
@@ -149,11 +153,11 @@ class CLISyncAllTest < Minitest::Test
     baseline = LocalVault::SyncState.local_checksum(store)
     LocalVault::SyncState.new("production").write!(checksum: baseline, direction: "push")
 
-    # Remote has a different checksum (someone else pushed)
-    new_remote_cs = "deadbeef" * 8  # 64 chars, different from baseline
-    blob = build_v1_blob_from_store("production")
+    # Remote bundle carries different secrets bytes (someone else pushed),
+    # so its secrets-hash differs from the baseline while local is unchanged.
+    blob = build_v1_blob("production")
     @fake_client.set_list_response({ "vaults" => [
-      { "name" => "production", "checksum" => new_remote_cs, "shared" => false }
+      { "name" => "production", "checksum" => "ignored-bundle-hash", "shared" => false }
     ] })
     @fake_client.set_vault_blob("production", blob)
 
@@ -173,11 +177,11 @@ class CLISyncAllTest < Minitest::Test
     # Edit locally
     vault.set("LOCAL_CHANGE", "yes")
 
-    # Remote also changed
-    new_remote_cs = "cafebabe" * 8
+    # Remote also changed (different secrets from both baseline and local)
     @fake_client.set_list_response({ "vaults" => [
-      { "name" => "production", "checksum" => new_remote_cs, "shared" => false }
+      { "name" => "production", "checksum" => "ignored-bundle-hash", "shared" => false }
     ] })
+    @fake_client.set_vault_blob("production", build_v1_blob("production"))
 
     out, err = run_sync
     assert_match(/production.*CONFLICT.*both.*changed/i, out)
@@ -196,12 +200,13 @@ class CLISyncAllTest < Minitest::Test
     baseline = LocalVault::SyncState.local_checksum(store)
     LocalVault::SyncState.new("marketing").write!(checksum: baseline, direction: "pull")
 
-    # Edit locally, but vault is shared (not ours)
+    # Snapshot the remote bundle (unchanged), then edit locally. Vault is shared.
+    @fake_client.set_vault_blob("marketing", build_v1_blob_from_store("marketing"))
     vault = LocalVault::Vault.new(name: "marketing", master_key: @master_key)
     vault.set("LOCAL_EDIT", "yes")
 
     @fake_client.set_list_response({ "vaults" => [
-      { "name" => "marketing", "owner_handle" => "mustafa", "shared" => true, "checksum" => baseline }
+      { "name" => "marketing", "owner_handle" => "mustafa", "shared" => true, "checksum" => "ignored-bundle-hash" }
     ] })
 
     out, = run_sync
@@ -216,10 +221,9 @@ class CLISyncAllTest < Minitest::Test
     baseline = LocalVault::SyncState.local_checksum(store)
     LocalVault::SyncState.new("marketing").write!(checksum: baseline, direction: "pull")
 
-    new_remote_cs = "newremote" * 8
-    blob = build_v1_blob_from_store("marketing")
+    blob = build_v1_blob("marketing")
     @fake_client.set_list_response({ "vaults" => [
-      { "name" => "marketing", "owner_handle" => "mustafa", "shared" => true, "checksum" => new_remote_cs }
+      { "name" => "marketing", "owner_handle" => "mustafa", "shared" => true, "checksum" => "ignored-bundle-hash" }
     ] })
     @fake_client.set_vault_blob("marketing", blob)
 
@@ -241,30 +245,40 @@ class CLISyncAllTest < Minitest::Test
            "dry run should not push"
   end
 
-  # ── First sync, matching checksums → skip ───────────────
+  # ── First sync, identical secrets → adopt baseline ──────
 
-  def test_sync_first_time_matching_checksums_skips
+  def test_sync_first_time_matching_secrets_adopts_baseline
     create_test_vault("production")
-    store = LocalVault::Store.new("production")
-    local_cs = LocalVault::SyncState.local_checksum(store)
 
-    # No .sync_state yet, but checksums match
+    # No .sync_state yet, but the remote bundle's secrets bytes match local.
     @fake_client.set_list_response({ "vaults" => [
-      { "name" => "production", "checksum" => local_cs, "shared" => false }
+      { "name" => "production", "checksum" => "ignored-bundle-hash", "shared" => false }
     ] })
+    @fake_client.set_vault_blob("production", build_v1_blob_from_store("production"))
 
     out, = run_sync
-    assert_match(/production.*skip.*already in sync/i, out)
+    assert_match(/production.*adopt.*recording baseline/i, out)
+    assert_match(/baselined production/i, out)
+
+    # Baseline should now be written so future syncs can detect drift.
+    ss = LocalVault::SyncState.new("production")
+    assert ss.exists?, "adopt should write .sync_state"
+    assert_equal "adopt", ss.read["direction"]
+
+    # Neither push nor pull should have happened.
+    refute @fake_client.calls.any? { |c| c[:method] == :push_vault }, "adopt should not push"
   end
 
-  # ── First sync, mismatched checksums → conflict ─────────
+  # ── First sync, differing secrets → conflict ────────────
 
-  def test_sync_first_time_mismatched_checksums_conflicts
+  def test_sync_first_time_differing_secrets_conflicts
     create_test_vault("production")
 
+    # No baseline and the remote bundle's secrets differ from local.
     @fake_client.set_list_response({ "vaults" => [
-      { "name" => "production", "checksum" => "different" * 8, "shared" => false }
+      { "name" => "production", "checksum" => "ignored-bundle-hash", "shared" => false }
     ] })
+    @fake_client.set_vault_blob("production", build_v1_blob("production"))
 
     out, = run_sync
     assert_match(/production.*CONFLICT.*no sync baseline/i, out)

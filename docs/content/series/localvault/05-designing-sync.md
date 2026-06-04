@@ -82,10 +82,8 @@ Mac 2:  localvault login     # pulls your public key from InventList
 
 The vault file is encrypted with your passphrase as always. Sync is just transport — the passphrase requirement doesn't go away. What you gain is not having to manually copy files between machines.
 
-## What's still to build
+## How it shipped
 
-This is all planned, not yet shipped. The current version of LocalVault is local-only. The sync work (keypair generation, InventList API, R2 storage, push/pull commands, team sharing) is the next major phase.
+All of this is now live. The work landed in three phases: the identity layer (keypair generation + `login` + the InventList API), then single-user sync (`sync push`/`pull` plus the bidirectional `localvault sync`), then team sharing (key slots, `team init`, scoped access).
 
-The backlog is in `docs/backlog/vault-sync/` — 11 items across three phases. Phase 1 is the identity layer (keygen + login + InventList API endpoint). Phase 2 is single-user sync. Phase 3 is teams.
-
-I wanted to write about the design before the code, because the security model is the interesting part — and it's easier to see the shape of it before it's buried in implementation details.
+I wrote about the design before the code, because the security model is the interesting part — and it's easier to see the shape of it before it's buried in implementation details. The implementation followed the shape laid out above.

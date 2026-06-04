@@ -11,15 +11,45 @@ LocalVault sync stores your encrypted vault on Cloudflare R2 via InventList. You
 ## Setup (one time)
 
 ```bash
-# 1. Generate your keypair — creates your X25519 identity
-localvault keygen
-
-# 2. Log in with your InventList API token
-#    This validates your token and publishes your public key to your profile
+# Log in with your InventList API token. This validates your token,
+# generates your X25519 identity keypair if you don't have one yet,
+# and publishes your public key to your profile.
 localvault login <your-token>
 ```
 
-Get your API token at inventlist.com/settings.
+Get your API token at `inventlist.com/@YOUR_HANDLE/edit#developer`. (If you'd
+rather create the keypair ahead of time, `localvault keys generate` does that;
+`login` will use the existing key.)
+
+## Sync everything in one command
+
+Most of the time you just run:
+
+```bash
+localvault sync            # push local changes, pull remote changes, for every vault
+localvault sync --dry-run  # preview the plan without making any changes
+```
+
+For each vault it compares local and remote and picks a direction:
+
+```
+  Vault         Action  Reason
+  ────────────  ──────  ──────
+  production    push    local only
+  staging       pull    remote changes
+  default       skip    up to date
+  agpages       adopt   in sync — recording baseline
+  notes         CONFLICT  both local and remote changed since last sync
+```
+
+- **push** / **pull** — only one side changed since the last sync, so the direction is unambiguous.
+- **skip** — nothing changed on either side.
+- **adopt** — both sides already hold identical secrets but there was no sync baseline yet (e.g. a vault pushed before sync tracking existed); LocalVault records a baseline so future syncs can detect drift. No data moves.
+- **CONFLICT** — both sides changed independently, or both exist with no baseline and the secrets genuinely differ. LocalVault never overwrites either side here; resolve it explicitly with `sync push <vault>` (keep local) or `sync pull <vault> --force` (keep remote).
+
+The summary line reports the counts, e.g. `Summary: 1 pushed, 1 pulled, 1 baselined, 1 up to date`.
+
+The sections below cover the single-vault `sync push` / `sync pull` commands that the bidirectional sync is built on.
 
 ## Push a vault to the cloud
 
@@ -95,6 +125,6 @@ InventList never stores your passphrase, private key, or unencrypted secrets.
 | Passphrase | Never transmitted, never stored server-side |
 | Private key | Never leaves your machine |
 
-## Team access (coming soon)
+## Team access
 
-Team vaults will let you add collaborators by InventList handle. LocalVault will look up their public key from their profile and create an encrypted key slot — no passphrase sharing required. See [VS-009/010/011](../../backlog/vault-sync/backlog.md) in the backlog.
+Team vaults let you add collaborators by InventList handle. LocalVault looks up their public key from their profile and creates an encrypted key slot — no passphrase sharing required. Run `localvault team init` to convert a vault, then `localvault add @handle` to grant access (optionally `--scope KEY...` for access to specific keys only). See the team-sharing articles later in this series for the full flow.

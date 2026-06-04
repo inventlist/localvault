@@ -64,9 +64,9 @@ The blob is tied to your InventList account. Only you can push or pull it. The p
 
 ```bash
 localvault sync status
-# Vault          Status        Last synced
-# default        synced        2 minutes ago
-# production     synced        1 hour ago
+# Vault          Status        Synced At
+# default        synced        2026-03-15
+# production     synced        2026-03-15
 # x              local only    —
 # staging        local only    —
 ```
@@ -91,7 +91,7 @@ localvault sync push production
 localvault sync pull production
 ```
 
-There's no auto-sync or conflict resolution. The last push wins. For solo use this is fine — you know what you changed.
+The per-vault `sync push`/`pull` commands are last-write-wins — they do exactly what you tell them. The bare `localvault sync`, though, tracks a per-vault baseline: it pushes only when local changed, pulls only when remote changed, records a baseline automatically when both sides are already identical, and stops with a CONFLICT if both sides diverged so nothing is silently overwritten. For solo use across machines, run `localvault sync` and let it pick the direction.
 
 ## Personal Sync vs Team Sync
 

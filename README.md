@@ -105,7 +105,6 @@ localvault exec -- rails server
 | `sync push [NAME]` | Push one vault to cloud |
 | `sync pull [NAME]` | Pull one vault from cloud (auto-unlocks if you have a key slot) |
 | `sync status` | Show sync state for all vaults |
-| `config set server URL` | Point at a custom server (default: inventlist.com) |
 
 ### Team Sharing (v1.3.0)
 
@@ -139,7 +138,7 @@ backward compatibility but the top-level forms are preferred.
 
 | Command | Description |
 |---------|-------------|
-| `install-mcp [CLIENT]` | Configure MCP server in claude-code, cursor, windsurf, or zed |
+| `install-mcp [CLIENT]` | Configure MCP server in claude-code, cursor, or windsurf |
 | `mcp` | Start MCP server (stdio transport) |
 
 All commands accept `--vault NAME` (or `-v NAME`) to target a specific vault. Default vault is `default`.

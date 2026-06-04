@@ -90,7 +90,7 @@ module LocalVault
     def self.unpack(blob, expected_name: nil)
       data = JSON.parse(blob)
       version = data["version"]
-      raise UnpackError, "Unsupported bundle version: #{version}" if version && !SUPPORTED_VERSIONS.include?(version)
+      raise UnpackError, "Unsupported bundle version: #{version.inspect}" unless SUPPORTED_VERSIONS.include?(version)
 
       meta_raw    = Base64.strict_decode64(data.fetch("meta"))
       secrets_raw = Base64.strict_decode64(data.fetch("secrets"))
