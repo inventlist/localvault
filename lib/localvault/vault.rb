@@ -1,5 +1,6 @@
 require "json"
 require "shellwords"
+require_relative "env_projection"
 
 module LocalVault
   # Encrypted key-value store backed by a single JSON blob.
@@ -143,44 +144,15 @@ module LocalVault
     # @example
     #   vault.export_env(project: "myapp")
     #   # => "export DB_URL=postgres%3A//..."
-    def export_env(project: nil, on_skip: nil)
-      secrets = all
-      if project
-        group = secrets[project]
-        return "" unless group.is_a?(Hash)
-        group.filter_map do |k, v|
-          if shell_safe_key?(k)
-            "export #{k}=#{Shellwords.escape(v.to_s)}"
-          else
-            on_skip&.call(k)
-            nil
-          end
-        end.join("\n")
-      else
-        secrets.flat_map do |k, v|
-          if v.is_a?(Hash)
-            unless shell_safe_key?(k)
-              on_skip&.call(k)
-              next []
-            end
-            v.filter_map do |sk, sv|
-              if shell_safe_key?(sk)
-                "export #{k.upcase}__#{sk}=#{Shellwords.escape(sv.to_s)}"
-              else
-                on_skip&.call("#{k}.#{sk}")
-                nil
-              end
-            end
-          else
-            if shell_safe_key?(k)
-              ["export #{k}=#{Shellwords.escape(v.to_s)}"]
-            else
-              on_skip&.call(k)
-              []
-            end
-          end
-        end.join("\n")
-      end
+    def export_env(project: nil, on_skip: nil, only: nil, except: nil, map: nil, profile: nil)
+      EnvProjection.entries(all,
+        project: project,
+        only: only,
+        except: except,
+        map: map,
+        profile: profile,
+        on_skip: on_skip
+      ).map { |entry| "export #{entry.env_name}=#{Shellwords.escape(entry.value)}" }.join("\n")
     end
 
     # Returns a flat hash suitable for env injection.
@@ -195,40 +167,16 @@ module LocalVault
     # @example
     #   vault.env_hash(project: "myapp")
     #   # => {"DB_URL" => "postgres://...", "SECRET" => "abc"}
-    def env_hash(project: nil, on_skip: nil)
-      secrets = all
-      if project
-        group = secrets[project]
-        return {} unless group.is_a?(Hash)
-        group.each_with_object({}) do |(k, v), h|
-          if shell_safe_key?(k)
-            h[k] = v.to_s
-          else
-            on_skip&.call(k)
-          end
-        end
-      else
-        secrets.each_with_object({}) do |(k, v), h|
-          if v.is_a?(Hash)
-            unless shell_safe_key?(k)
-              on_skip&.call(k)
-              next
-            end
-            v.each do |sk, sv|
-              if shell_safe_key?(sk)
-                h["#{k.upcase}__#{sk}"] = sv.to_s
-              else
-                on_skip&.call("#{k}.#{sk}")
-              end
-            end
-          else
-            if shell_safe_key?(k)
-              h[k] = v.to_s
-            else
-              on_skip&.call(k)
-            end
-          end
-        end
+    def env_hash(project: nil, on_skip: nil, only: nil, except: nil, map: nil, profile: nil)
+      EnvProjection.entries(all,
+        project: project,
+        only: only,
+        except: except,
+        map: map,
+        profile: profile,
+        on_skip: on_skip
+      ).each_with_object({}) do |entry, hash|
+        hash[entry.env_name] = entry.value
       end
     end
 

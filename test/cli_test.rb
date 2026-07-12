@@ -198,6 +198,79 @@ class CLITest < Minitest::Test
     end
   end
 
+  def test_env_only_filters_by_exact_key_and_namespace
+    vault = create_test_vault("default")
+    vault.set("AWS_IAM.access_key_id", "akia")
+    vault.set("AWS_IAM.secret_access_key", "secret")
+    vault.set("AWS_SES.smtp_password", "smtp")
+    vault.set("OPENAI_API_KEY", "sk")
+
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(["env", "--only", "AWS_IAM.*,OPENAI_API_KEY"]) }
+      assert_includes out, "AWS_IAM__access_key_id"
+      assert_includes out, "AWS_IAM__secret_access_key"
+      assert_includes out, "OPENAI_API_KEY"
+      refute_includes out, "AWS_SES__smtp_password"
+    end
+  end
+
+  def test_env_except_removes_matching_keys_after_only
+    vault = create_test_vault("default")
+    vault.set("AWS_IAM.access_key_id", "akia")
+    vault.set("AWS_IAM.secret_access_key", "secret")
+    vault.set("AWS_SES.smtp_password", "smtp")
+
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(["env", "--only", "AWS_IAM.*,AWS_SES.*", "--except", "AWS_SES.*"]) }
+      assert_includes out, "AWS_IAM__access_key_id"
+      assert_includes out, "AWS_IAM__secret_access_key"
+      refute_includes out, "AWS_SES__smtp_password"
+    end
+  end
+
+  def test_env_map_renames_selected_key
+    vault = create_test_vault("default")
+    vault.set("AWS_IAM.access_key_id", "akia")
+
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(["env", "--map", "AWS_IAM.access_key_id=AWS_ACCESS_KEY_ID"]) }
+      assert_includes out, "export AWS_ACCESS_KEY_ID="
+      refute_includes out, "AWS_IAM__access_key_id"
+    end
+  end
+
+  def test_env_profile_aws_maps_canonical_aws_names_and_scopes_to_aws_iam
+    vault = create_test_vault("default")
+    vault.set("AWS_IAM.access_key_id", "akia")
+    vault.set("AWS_IAM.secret_access_key", "secret")
+    vault.set("AWS_IAM.session_token", "token")
+    vault.set("AWS_SES.smtp_password", "smtp")
+
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[env --profile aws]) }
+      assert_includes out, "export AWS_ACCESS_KEY_ID="
+      assert_includes out, "export AWS_SECRET_ACCESS_KEY="
+      assert_includes out, "export AWS_SESSION_TOKEN="
+      refute_includes out, "AWS_IAM__access_key_id"
+      refute_includes out, "AWS_SES__smtp_password"
+    end
+  end
+
+  def test_env_explicit_map_overrides_profile_map
+    vault = create_test_vault("default")
+    vault.set("AWS_IAM.access_key_id", "akia")
+    vault.set("AWS_IAM.secret_access_key", "secret")
+
+    with_session("default") do
+      out, = capture_io do
+        LocalVault::CLI.start(["env", "--profile", "aws", "--map", "AWS_IAM.access_key_id=CUSTOM_AWS_KEY"])
+      end
+      assert_includes out, "export CUSTOM_AWS_KEY="
+      assert_includes out, "export AWS_SECRET_ACCESS_KEY="
+      refute_includes out, "AWS_ACCESS_KEY_ID"
+    end
+  end
+
   # --- vaults ---
 
   def test_vaults_lists_all_vault_names
@@ -768,6 +841,28 @@ class CLITest < Minitest::Test
       }
       output = IO.popen(env, [RbConfig.ruby, bin_path, "exec", "--", RbConfig.ruby, "-e", 'puts ENV["MY_VAR"]']) { |io| io.read }
       assert_equal "hello_from_vault\n", output
+    end
+  end
+
+  def test_exec_applies_env_dsl_options
+    vault = create_test_vault("default")
+    vault.set("AWS_IAM.access_key_id", "akia")
+    vault.set("AWS_IAM.secret_access_key", "secret")
+    vault.set("AWS_SES.smtp_password", "smtp")
+    with_session("default") do
+      bin_path = File.expand_path("../../bin/localvault", __FILE__)
+      env = {
+        "LOCALVAULT_HOME" => @test_home,
+        "LOCALVAULT_SESSION" => ENV["LOCALVAULT_SESSION"]
+      }
+      script = 'puts [ENV["AWS_ACCESS_KEY_ID"], ENV["AWS_SECRET_ACCESS_KEY"], ENV.key?("AWS_SES__smtp_password")].join("|")'
+      output = IO.popen(env, [
+        RbConfig.ruby, bin_path,
+        "exec", "--profile", "aws", "--except", "AWS_SES.*", "--",
+        RbConfig.ruby, "-e", script
+      ]) { |io| io.read }
+
+      assert_equal "akia|secret|false\n", output
     end
   end
 

@@ -26,7 +26,7 @@ The shift that made LocalVault much more useful was when AI coding agents became
 
 The naive solution is to paste your keys into the conversation. That's obviously bad. Some tools have their own secret management, but it's per-tool and none of them talk to each other.
 
-MCP (Model Context Protocol) changed this. You can expose a controlled interface to the agent — it can ask for specific secrets by name, and your vault handles the rest. The agent never sees your passphrase. You don't have to paste anything. The session expires when your terminal closes.
+MCP (Model Context Protocol) changed this. You can expose a controlled interface to the agent — it can ask for specific secrets by name, and your vault handles the rest. The agent never sees your passphrase. You don't have to paste anything. Cached sessions expire by TTL or when you run `localvault lock`.
 
 Running `localvault install-mcp` now wires this up globally for Claude Code in one command. The agent just calls `get_secret("OPENAI_API_KEY")` and gets what it needs.
 

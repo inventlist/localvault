@@ -58,13 +58,13 @@ class MCPServerTest < Minitest::Test
 
   # --- tools/list ---
 
-  def test_tools_list_returns_four_tools
+  def test_tools_list_returns_five_tools
     with_vault_session do
       response = send_request("tools/list", {})
       tools = response.dig("result", "tools")
-      assert_equal 4, tools.size
+      assert_equal 5, tools.size
       names = tools.map { |t| t["name"] }.sort
-      assert_equal %w[delete_secret get_secret list_secrets set_secret], names
+      assert_equal %w[delete_secret get_secret list_secrets localvault_whoami set_secret], names
     end
   end
 
@@ -101,13 +101,49 @@ class MCPServerTest < Minitest::Test
     end
   end
 
-  def test_get_secret_uses_session_vault_by_default
+  def test_get_secret_uses_session_when_it_matches_resolved_default
     vault_a = create_test_vault("vaultA")
     vault_a.set("KEY", "from_a")
+    LocalVault::Config.default_vault = "vaultA"
     ENV["LOCALVAULT_SESSION"] = session_token_for("vaultA")
 
     response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY" } })
     assert_equal "from_a", response.dig("result", "content", 0, "text")
+  end
+
+  def test_get_secret_uses_default_vault_instead_of_unrelated_session_vault
+    default_vault = create_test_vault("devops")
+    session_vault = create_test_vault("intellectaco")
+    default_vault.set("KEY", "from_devops")
+    session_vault.set("KEY", "from_intellectaco")
+    LocalVault::Config.default_vault = "devops"
+
+    master_default = LocalVault::Crypto.derive_master_key(test_passphrase, LocalVault::Store.new("devops").salt)
+    ENV["LOCALVAULT_SESSION"] = session_token_for("intellectaco")
+
+    stub_keychain(->(name) { name == "devops" ? master_default : nil }) do
+      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY" } })
+      assert_equal "from_devops", response.dig("result", "content", 0, "text")
+    end
+  end
+
+  def test_lock_revokes_cached_mcp_access_without_restart
+    vault = create_test_vault("default")
+    vault.set("KEY", "value")
+    master_key = LocalVault::Crypto.derive_master_key(test_passphrase, LocalVault::Store.new("default").salt)
+
+    calls = 0
+    stub_keychain(->(_name) { calls += 1; calls == 1 ? master_key : nil }) do
+      require "localvault/mcp/server"
+      server = LocalVault::MCP::Server.new(input: StringIO.new, output: StringIO.new)
+
+      ok = server_call(server, "tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY" } })
+      assert_equal "value", ok.dig("result", "content", 0, "text")
+
+      locked = server_call(server, "tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY" } })
+      assert locked.dig("result", "isError")
+      assert_match(/No unlocked vault session/, locked.dig("result", "content", 0, "text"))
+    end
   end
 
   def test_get_secret_missing_key_returns_error
@@ -139,6 +175,85 @@ class MCPServerTest < Minitest::Test
     end
   end
 
+  def test_list_secrets_filters_by_prefix_and_query
+    with_vault_session do |vault|
+      vault.set("AWS_IAM.access_key_id", "akia")
+      vault.set("AWS_IAM.secret_access_key", "super-private-value")
+      vault.set("AWS_SES.smtp_password", "smtp")
+      vault.set("OPENAI_API_KEY", "sk")
+
+      by_prefix = send_request("tools/call", {
+        "name" => "list_secrets",
+        "arguments" => { "prefix" => "AWS_IAM." }
+      })
+      assert_equal "AWS_IAM.access_key_id\nAWS_IAM.secret_access_key", by_prefix.dig("result", "content", 0, "text")
+
+      by_query = send_request("tools/call", {
+        "name" => "list_secrets",
+        "arguments" => { "query" => "smtp" }
+      })
+      assert_equal "AWS_SES.smtp_password", by_query.dig("result", "content", 0, "text")
+    end
+  end
+
+  def test_get_secret_partial_match_returns_candidates_not_value
+    with_vault_session do |vault|
+      vault.set("AWS_IAM.access_key_id", "akia")
+      vault.set("AWS_IAM.secret_access_key", "secret")
+
+      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "AWS_IAM" } })
+      text = response.dig("result", "content", 0, "text")
+      assert response.dig("result", "isError")
+      assert_match(/Multiple keys match 'AWS_IAM'/, text)
+      assert_match(/AWS_IAM.access_key_id/, text)
+      assert_match(/AWS_IAM.secret_access_key/, text)
+      refute_match(/akia|super-private-value/, text)
+    end
+  end
+
+  def test_get_secret_single_partial_match_returns_candidate_not_value
+    with_vault_session do |vault|
+      vault.set("CLOUDFLARE_API_TOKEN", "cf-secret")
+
+      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "cloudflare" } })
+      text = response.dig("result", "content", 0, "text")
+      assert response.dig("result", "isError")
+      assert_match(/Key 'cloudflare' not found/, text)
+      assert_match(/CLOUDFLARE_API_TOKEN/, text)
+      refute_match(/cf-secret/, text)
+    end
+  end
+
+  def test_get_secret_missing_key_argument_returns_tool_error
+    with_vault_session do
+      response = send_request("tools/call", { "name" => "get_secret", "arguments" => {} })
+
+      assert response.dig("result", "isError")
+      assert_match(/Missing required argument 'key'/, response.dig("result", "content", 0, "text"))
+    end
+  end
+
+  def test_get_secret_non_object_arguments_return_tool_error
+    with_vault_session do
+      response = send_request("tools/call", { "name" => "get_secret", "arguments" => "not-an-object" })
+
+      assert response.dig("result", "isError")
+      assert_match(/Invalid arguments/, response.dig("result", "content", 0, "text"))
+    end
+  end
+
+  def test_list_secrets_rejects_non_string_filters
+    with_vault_session do
+      response = send_request("tools/call", {
+        "name" => "list_secrets",
+        "arguments" => { "prefix" => 123 }
+      })
+
+      assert response.dig("result", "isError")
+      assert_match(/prefix/, response.dig("result", "content", 0, "text"))
+    end
+  end
+
   # --- tools/call set_secret ---
 
   def test_set_secret_stores_value
@@ -158,6 +273,29 @@ class MCPServerTest < Minitest::Test
       })
       refute response.dig("result", "isError")
       assert_equal "postgres://localhost/test", vault.get("platepose.DATABASE_URL")
+    end
+  end
+
+  def test_set_secret_group_scalar_conflict_returns_tool_error
+    with_vault_session do |vault|
+      vault.set("app.DB", "postgres")
+
+      response = send_request("tools/call", {
+        "name" => "set_secret",
+        "arguments" => { "key" => "app", "value" => "oops" }
+      })
+
+      assert response.dig("result", "isError")
+      assert_match(/group containing 1 secret/, response.dig("result", "content", 0, "text"))
+    end
+  end
+
+  def test_set_secret_missing_value_argument_returns_tool_error
+    with_vault_session do
+      response = send_request("tools/call", { "name" => "set_secret", "arguments" => { "key" => "NEW_KEY" } })
+
+      assert response.dig("result", "isError")
+      assert_match(/Missing required argument 'value'/, response.dig("result", "content", 0, "text"))
     end
   end
 
@@ -181,6 +319,15 @@ class MCPServerTest < Minitest::Test
     end
   end
 
+  def test_delete_secret_missing_key_argument_returns_tool_error
+    with_vault_session do
+      response = send_request("tools/call", { "name" => "delete_secret", "arguments" => {} })
+
+      assert response.dig("result", "isError")
+      assert_match(/Missing required argument 'key'/, response.dig("result", "content", 0, "text"))
+    end
+  end
+
   # --- multi-vault: named vault via argument ---
 
   def test_get_secret_from_explicit_vault_via_keychain
@@ -192,6 +339,7 @@ class MCPServerTest < Minitest::Test
     master_b = LocalVault::Crypto.derive_master_key(test_passphrase, LocalVault::Store.new("teamB").salt)
 
     # Default session = teamA
+    LocalVault::Config.default_vault = "teamA"
     ENV["LOCALVAULT_SESSION"] = session_token_for("teamA")
 
     # Stub Keychain: only return master_b for "teamB"
@@ -256,6 +404,30 @@ class MCPServerTest < Minitest::Test
       response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "X" } })
       assert response.dig("result", "isError")
       assert_match(/localvault show/, response.dig("result", "content", 0, "text"))
+    end
+  end
+
+  # --- tools/call localvault_whoami ---
+
+  def test_whoami_reports_active_session_and_unlocked_vaults
+    create_test_vault("devops")
+    create_test_vault("intellectaco")
+    LocalVault::Config.default_vault = "devops"
+    ENV["LOCALVAULT_SESSION"] = session_token_for("intellectaco")
+
+    master_default = LocalVault::Crypto.derive_master_key(test_passphrase, LocalVault::Store.new("devops").salt)
+
+    stub_keychain(->(name) { name == "devops" ? master_default : nil }) do
+      response = send_request("tools/call", { "name" => "localvault_whoami", "arguments" => {} })
+      structured = response.dig("result", "structuredContent")
+      text = response.dig("result", "content", 0, "text")
+
+      assert_equal "devops", structured["active_vault"]
+      assert_equal "config", structured["active_vault_source"]
+      assert_equal "intellectaco", structured["session_vault"]
+      assert_includes structured["unlocked_vaults"], "devops"
+      assert_includes structured["unlocked_vaults"], "intellectaco"
+      assert_match(/Active vault: devops/, text)
     end
   end
 

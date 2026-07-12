@@ -2,7 +2,10 @@ require "thor"
 require "io/console"
 require "base64"
 require "lipgloss"
+require_relative "env_projection"
+require_relative "key_lookup"
 require_relative "session_cache"
+require_relative "vault_resolver"
 
 module LocalVault
   class CLI < Thor
@@ -146,28 +149,18 @@ module LocalVault
     DESC
     def get(key)
       vault = open_vault!
-      value = vault.get(key)
+      lookup = KeyLookup.lookup(vault, key)
 
-      if value.nil?
-        # Fall back to case-insensitive substring match
-        all_keys = vault.list
-        matches  = all_keys.select { |k| k.downcase.include?(key.downcase) }
-
-        if matches.size == 1
-          value = vault.get(matches.first)
-          $stdout.puts value
-          return
-        elsif matches.size > 1
-          $stderr.puts "Error: Multiple keys match '#{key}'. Be more specific:"
-          matches.sort.each { |k| $stderr.puts "  #{k}" }
-          return
-        else
-          abort_with "Key '#{key}' not found in vault '#{vault.name}'"
-          return
-        end
+      if lookup.exact?
+        $stdout.puts lookup.value
+      elsif lookup.single_match?
+        $stdout.puts vault.get(lookup.matches.first)
+      elsif lookup.multiple_matches?
+        $stderr.puts "Error: Multiple keys match '#{key}'. Be more specific:"
+        lookup.matches.each { |k| $stderr.puts "  #{k}" }
+      else
+        abort_with "Key '#{key}' not found in vault '#{vault.name}'"
       end
-
-      $stdout.puts value
     end
 
     desc "list", "List all secret keys in the vault"
@@ -231,13 +224,25 @@ module LocalVault
 \x05    eval $(localvault env -v intellectaco)
 \x05    # → export PLATEPOSE__DATABASE_URL=...  export INVENTLIST__DATABASE_URL=...
 
+      SCOPED EXPORTS:
+\x05    localvault env --only AWS_IAM.*
+\x05    localvault env --only AWS_IAM.*,AWS_SES.* --except AWS_SES.smtp_password
+\x05    localvault env --map AWS_IAM.access_key_id=AWS_ACCESS_KEY_ID
+\x05    localvault env --profile aws
+
       Use `localvault exec` to inject directly into a subprocess without eval.
     DESC
     method_option :project, aliases: "-p", type: :string, desc: "Export only this project group (no prefix)"
+    method_option :only, type: :string, desc: "Export only exact keys or namespaces (KEY,GROUP.*)"
+    method_option :except, type: :string, desc: "Exclude exact keys or namespaces after --only"
+    method_option :map, type: :string, desc: "Map vault keys to env vars (KEY=ENV_NAME)"
+    method_option :profile, type: :string, desc: "Apply a built-in env mapping profile (aws)"
     def env
       vault = open_vault!
       skip_warn = ->(k) { $stderr.puts "Warning: skipping unsafe key '#{k}'" }
-      $stdout.puts vault.export_env(project: options[:project], on_skip: skip_warn)
+      $stdout.puts vault.export_env(**env_projection_options(on_skip: skip_warn))
+    rescue EnvProjection::InvalidMapping, EnvProjection::UnknownProfile => e
+      abort_with e.message
     end
 
     desc "exec -- CMD", "Run a command with secrets injected as environment variables"
@@ -256,13 +261,24 @@ module LocalVault
       TEAM VAULT — all projects (keys prefixed to avoid collisions):
 \x05    localvault exec -v intellectaco -- your-script
 \x05    # → PLATEPOSE__DATABASE_URL, INVENTLIST__DATABASE_URL, etc.
+
+      SCOPED INJECTION:
+\x05    localvault exec --only AWS_IAM.* -- aws sts get-caller-identity
+\x05    localvault exec --profile aws -- aws s3 ls
+\x05    localvault exec --map AWS_IAM.access_key_id=AWS_ACCESS_KEY_ID -- env
     DESC
     method_option :project, aliases: "-p", type: :string, desc: "Inject only this project group (no prefix)"
+    method_option :only, type: :string, desc: "Inject only exact keys or namespaces (KEY,GROUP.*)"
+    method_option :except, type: :string, desc: "Exclude exact keys or namespaces after --only"
+    method_option :map, type: :string, desc: "Map vault keys to env vars (KEY=ENV_NAME)"
+    method_option :profile, type: :string, desc: "Apply a built-in env mapping profile (aws)"
     def exec(*cmd)
       vault = open_vault!
       skip_warn = ->(k) { $stderr.puts "Warning: skipping unsafe key '#{k}'" }
-      env_vars = vault.env_hash(project: options[:project], on_skip: skip_warn)
+      env_vars = vault.env_hash(**env_projection_options(on_skip: skip_warn))
       Kernel.exec(env_vars, *cmd)
+    rescue EnvProjection::InvalidMapping, EnvProjection::UnknownProfile => e
+      abort_with e.message
     end
 
     desc "vaults", "List all vaults with secret counts"
@@ -466,8 +482,10 @@ module LocalVault
         cursor        Adds to ~/.cursor/mcp.json
         windsurf      Adds to ~/.codeium/windsurf/mcp_config.json
 
-      The MCP server uses whichever vault is your current default (localvault switch).
-      Unlock the vault once with `localvault show`, then the AI tool picks it up via Keychain.
+      The MCP server uses the same active vault rules as the CLI: explicit vault,
+      then LOCALVAULT_VAULT, then the configured default from `localvault switch`.
+      Unlock with `localvault show` or `localvault unlock`; `localvault lock`
+      revokes access without restarting the AI tool.
     DESC
     def install_mcp(client = "claude-code")
       case client.downcase
@@ -1514,7 +1532,18 @@ module LocalVault
     end
 
     def resolve_vault_name
-      options[:vault] || Config.default_vault
+      VaultResolver.active_vault_name(options[:vault]).first
+    end
+
+    def env_projection_options(on_skip:)
+      {
+        project: options[:project],
+        only: options[:only],
+        except: options[:except],
+        map: options[:map],
+        profile: options[:profile],
+        on_skip: on_skip
+      }
     end
 
     def open_vault_by_name!(vault_name)

@@ -214,28 +214,30 @@ localvault remove @alice -v production --rotate
 
 ## MCP Server (AI Agents)
 
-Give AI agents safe secret access. Keys never appear in agent context or config files.
+Give AI agents controlled secret access without hardcoding credentials in MCP config. Exact `get_secret` calls can return secret values to the agent; fuzzy reads return candidate names only.
 
 ```bash
 # One-command install for Claude Code
 localvault install-mcp claude-code
-# Also supports: cursor, windsurf, zed
+# Also supports: cursor, windsurf
 
 # Unlock your vault for the session
 localvault unlock
 
 # MCP tools available to the agent:
-#   get_secret(key, vault?)      — read a secret
-#   list_secrets(vault?, prefix?) — list key names
+#   localvault_whoami             — diagnose active vault/session state
+#   get_secret(key, vault?)       — read an exact secret key
+#   list_secrets(vault?, prefix?, query?) — list/search key names
 #   set_secret(key, value, vault?) — store a secret
-#   delete_secret(key, vault?)   — remove a secret
+#   delete_secret(key, vault?)    — remove a secret
 ```
 
-**exec_action** — agent declares intent, LocalVault executes with secrets injected. The agent never sees the key:
+Command injection stays in the CLI. Use selectors, mappings, and profiles to keep subprocess envs scoped:
 
 ```bash
-localvault exec_action -- curl -s https://api.openai.com/v1/models \
-  -H "Authorization: Bearer $OPENAI_API_KEY"
+localvault exec --profile aws -- aws sts get-caller-identity
+localvault exec --only AWS_IAM.*,AWS_SES.* --except AWS_SES.smtp_password -- your-script
+localvault env --map AWS_IAM.access_key_id=AWS_ACCESS_KEY_ID
 ```
 
 ## Multi-Project Vaults
@@ -256,6 +258,10 @@ localvault show -p myapp -v work
 # Export one project
 eval $(localvault env -p myapp -v work)
 
+# Export all projects with project.key transformed to PROJECT__key
+localvault env -v work
+# → MYAPP__DATABASE_URL, API__DATABASE_URL
+
 # Bulk import
 localvault import .env --prefix myapp -v work
 ```
@@ -272,7 +278,7 @@ localvault get API_KEY
 localvault exec -- rails server
 ```
 
-Session lives in `LOCALVAULT_SESSION` — disappears when the terminal closes.
+Unlocking writes a derived key to `LOCALVAULT_SESSION` and also caches it with an 8-hour TTL in Keychain or LocalVault's file fallback so MCP and new terminals can reuse it until `localvault lock`.
 
 ## Security
 
@@ -324,7 +330,7 @@ localvault login --server https://vaulthost.example
 git clone https://github.com/inventlist/localvault.git
 cd localvault
 bundle install
-bundle exec rake test  # 463 tests, 918 assertions
+bundle exec rake test
 ```
 
 ## Used by

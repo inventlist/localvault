@@ -18,7 +18,8 @@ gem build localvault.gemspec   # must build cleanly
 ## 3. Commit, tag, push
 
 ```bash
-git commit -am "fix: ... (vX.Y.Z)"
+git add -A
+git commit -m "fix: ... (vX.Y.Z)"
 git tag -a vX.Y.Z -m "localvault X.Y.Z"
 git push origin main
 git push origin vX.Y.Z

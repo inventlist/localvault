@@ -132,6 +132,24 @@ localvault show -p platepose -v intellectaco
 localvault exec -p platepose -v intellectaco -- rails server
 ```
 
+When exporting or injecting a whole vault, nested keys become shell-safe env vars:
+
+```bash
+AWS_IAM.access_key_id
+# → AWS_IAM__access_key_id
+```
+
+Use the env DSL to scope and rename injected values:
+
+```bash
+localvault env --only AWS_IAM.*
+localvault exec --only AWS_IAM.*,AWS_SES.* --except AWS_SES.smtp_password -- your-script
+localvault exec --profile aws -- aws sts get-caller-identity
+localvault env --map AWS_IAM.access_key_id=AWS_ACCESS_KEY_ID
+```
+
+Selectors are exact keys (`OPENAI_API_KEY`) or one-level namespaces (`AWS_IAM.*`). The `aws` profile maps `AWS_IAM.access_key_id`, `AWS_IAM.secret_access_key`, and `AWS_IAM.session_token` to the canonical AWS environment names.
+
 ## Dot-notation for vault name
 
 Named vault as a positional argument (sync commands) vs global flag (secrets commands):

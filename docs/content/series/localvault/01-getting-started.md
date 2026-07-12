@@ -69,7 +69,7 @@ Typing your passphrase every time gets old. Unlock once and all subsequent comma
 eval $(localvault unlock)
 ```
 
-This stores the derived master key in `LOCALVAULT_SESSION` in your shell's memory. It disappears when the terminal closes — it's never written to disk.
+This prints a `LOCALVAULT_SESSION` export for your shell and caches the derived master key with an 8-hour TTL in Keychain or LocalVault's file fallback. Run `localvault lock` when you want to revoke the cached session immediately.
 
 ## Inject secrets into commands
 

@@ -147,7 +147,7 @@ Register the MCP server:
 localvault install-mcp
 ```
 
-Done. Your AI agent now has access to your secrets through a controlled, encrypted interface. Your MCP config contains zero credentials. Your vault is encrypted at rest. The session expires when your terminal closes.
+Done. Your AI agent now has access to your secrets through a controlled, encrypted interface. Your MCP config contains zero credentials. Your vault is encrypted at rest. The cached session expires by TTL or immediately when you run `localvault lock`.
 
 On macOS, the session is also cached in Keychain with an 8-hour TTL — so opening a new terminal window doesn't reprompt you during your working day.
 

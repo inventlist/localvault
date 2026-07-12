@@ -1,4 +1,6 @@
 require "json"
+require_relative "../key_lookup"
+require_relative "../version"
 
 module LocalVault
   module MCP
@@ -28,6 +30,19 @@ module LocalVault
         {
           "name" => "list_secrets",
           "description" => "List all secret keys in a localvault vault",
+          "inputSchema" => {
+            "type" => "object",
+            "properties" => {
+              "prefix" => { "type" => "string", "description" => "Only return keys starting with this prefix" },
+              "query" => { "type" => "string", "description" => "Case-insensitive substring filter for key names" },
+              **VAULT_PARAM
+            },
+            "required" => []
+          }
+        },
+        {
+          "name" => "localvault_whoami",
+          "description" => "Show which localvault home, vault, and unlocked sessions the MCP server can see",
           "inputSchema" => {
             "type" => "object",
             "properties" => { **VAULT_PARAM },
@@ -72,12 +87,16 @@ module LocalVault
       #   and returns a Vault instance or nil
       # @return [Hash] MCP content result with "content" array and optional "isError"
       # @raise [ArgumentError] if the tool name is unknown
-      def self.call(name, arguments, vault_resolver)
+      def self.call(name, arguments, vault_resolver, status_resolver = nil)
         unless DEFINITIONS.any? { |t| t["name"] == name }
           raise ArgumentError, "Unknown tool: #{name}"
         end
 
+        return error_result("Invalid arguments; expected object") unless arguments.is_a?(Hash)
+
         vault_name = arguments["vault"]
+        return whoami(status_resolver.call(vault_name)) if name == "localvault_whoami"
+
         vault = vault_resolver.call(vault_name)
 
         unless vault
@@ -87,30 +106,54 @@ module LocalVault
 
         case name
         when "get_secret"    then get_secret(arguments["key"], vault)
-        when "list_secrets"  then list_secrets(vault)
+        when "list_secrets"  then list_secrets(vault, prefix: arguments["prefix"], query: arguments["query"])
         when "set_secret"    then set_secret(arguments["key"], arguments["value"], vault)
         when "delete_secret" then delete_secret(arguments["key"], vault)
         end
+      rescue StandardError => e
+        error_result(e.message)
       end
 
       def self.get_secret(key, vault)
-        value = vault.get(key)
-        value.nil? ? error_result("Key '#{key}' not found") : text_result(value)
+        return required_argument_error("key") unless present_string?(key)
+
+        lookup = KeyLookup.lookup(vault, key)
+        return text_result(lookup.value) if lookup.exact?
+
+        if lookup.multiple_matches?
+          return error_result(candidate_message("Multiple keys match '#{key}'. Be more specific:", lookup.matches))
+        end
+
+        if lookup.single_match?
+          return error_result(candidate_message("Key '#{key}' not found. Did you mean:", lookup.matches))
+        end
+
+        error_result("Key '#{key}' not found")
       end
 
-      def self.list_secrets(vault)
+      def self.list_secrets(vault, prefix: nil, query: nil)
+        return string_argument_error("prefix") unless optional_string?(prefix)
+        return string_argument_error("query") unless optional_string?(query)
+
         keys = vault.list
+        keys = keys.select { |key| key.start_with?(prefix) } if prefix && !prefix.empty?
+        keys = keys.select { |key| key.downcase.include?(query.downcase) } if query && !query.empty?
         keys.empty? ? text_result("No secrets stored") : text_result(keys.join("\n"))
       end
 
       def self.set_secret(key, value, vault)
+        return required_argument_error("key") unless present_string?(key)
+        return required_argument_error("value") unless value.is_a?(String)
+
         vault.set(key, value)
         text_result("Stored #{key}")
-      rescue Vault::InvalidKeyName => e
-        error_result("Invalid key name: #{e.message}")
+      rescue Vault::InvalidKeyName, RuntimeError => e
+        error_result(e.message)
       end
 
       def self.delete_secret(key, vault)
+        return required_argument_error("key") unless present_string?(key)
+
         deleted = vault.delete(key)
         deleted.nil? ? error_result("Key '#{key}' not found") : text_result("Deleted #{key}")
       end
@@ -123,7 +166,43 @@ module LocalVault
         { "content" => [{ "type" => "text", "text" => text }], "isError" => true }
       end
 
-      private_class_method :get_secret, :list_secrets, :set_secret, :delete_secret, :text_result, :error_result
+      def self.whoami(status)
+        structured = status.merge("version" => LocalVault::VERSION)
+        text = [
+          "LocalVault #{LocalVault::VERSION}",
+          "Home: #{structured["localvault_home"]}",
+          "Active vault: #{structured["active_vault"]} (#{structured["active_vault_source"]})",
+          "Active vault unlocked: #{structured["active_vault_unlocked"] ? "yes" : "no"}",
+          "Session vault: #{structured["session_vault"] || "-"}",
+          "Unlocked vaults: #{structured["unlocked_vaults"].empty? ? "-" : structured["unlocked_vaults"].join(", ")}"
+        ].join("\n")
+
+        text_result(text).merge("structuredContent" => structured)
+      end
+
+      def self.candidate_message(header, matches)
+        ([header] + matches.map { |match| "  #{match}" }).join("\n")
+      end
+
+      def self.present_string?(value)
+        value.is_a?(String) && !value.empty?
+      end
+
+      def self.optional_string?(value)
+        value.nil? || value.is_a?(String)
+      end
+
+      def self.required_argument_error(name)
+        error_result("Missing required argument '#{name}'")
+      end
+
+      def self.string_argument_error(name)
+        error_result("Argument '#{name}' must be a string")
+      end
+
+      private_class_method :get_secret, :list_secrets, :set_secret, :delete_secret,
+        :text_result, :error_result, :whoami, :candidate_message,
+        :present_string?, :optional_string?, :required_argument_error, :string_argument_error
     end
   end
 end

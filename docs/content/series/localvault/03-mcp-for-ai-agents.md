@@ -21,13 +21,13 @@ This registers localvault as a user-scope MCP server in Claude Code globally —
 For Cursor or Windsurf:
 
 ```bash
-localvault install-mcp --cursor
-localvault install-mcp --windsurf
+localvault install-mcp cursor
+localvault install-mcp windsurf
 ```
 
 ## How it works
 
-When you run `eval $(localvault unlock)`, the derived master key is cached in your shell session. The MCP server inherits this session and can decrypt your vault for the duration of your terminal session.
+When you run `eval $(localvault unlock)` or `localvault show`, the derived master key is cached for the active vault. MCP uses the same default-vault and session-cache rules as the CLI, so `localvault switch`, `LOCALVAULT_VAULT`, and `localvault lock` affect what the agent can access.
 
 The agent never sees your passphrase. It gets access to individual secrets only when it calls the MCP tools.
 
@@ -35,8 +35,9 @@ The agent never sees your passphrase. It gets access to individual secrets only 
 
 | Tool | What it does |
 |------|-------------|
-| `get_secret` | Retrieve a secret by key |
-| `list_secrets` | List all secret keys (values hidden) |
+| `localvault_whoami` | Diagnose active vault, session, and unlocked state |
+| `get_secret` | Retrieve an exact secret key |
+| `list_secrets` | List/search secret keys (values hidden) |
 | `set_secret` | Store a new secret |
 | `delete_secret` | Delete a secret |
 
@@ -50,9 +51,10 @@ The agent can work with any unlocked vault:
 get_secret(key: "DATABASE_URL", vault: "production")
 set_secret(key: "NEW_TOKEN", value: "...", vault: "staging")
 list_secrets(vault: "intellectaco")
+list_secrets(vault: "intellectaco", prefix: "AWS_IAM.")
 ```
 
-If no vault is specified, it uses whichever vault is currently unlocked in your session.
+If no vault is specified, MCP uses the same active vault as the CLI: explicit vault, then `LOCALVAULT_VAULT`, then `localvault switch` / configured default.
 
 ## Manual config (without install-mcp)
 
@@ -69,11 +71,11 @@ If you prefer manual setup, add to your MCP config:
 }
 ```
 
-The server picks up your active session automatically if you've run `eval $(localvault unlock)` in the same terminal.
+The server picks up the active default vault and any cached unlock state automatically.
 
 ## Security model
 
 - Your passphrase never touches the MCP protocol
 - The session token (`LOCALVAULT_SESSION`) is a derived key — it can decrypt your vault but cannot reconstruct your passphrase
-- Session expires when your terminal closes
+- Cached unlocks expire by TTL or immediately when you run `localvault lock`
 - The MCP server only runs when invoked — there is no background daemon

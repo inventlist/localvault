@@ -19,19 +19,19 @@ All crypto via [libsodium](https://doc.libsodium.org/) through the `rbnacl` gem.
 
 ## How a vault works
 
-A vault is a directory at `~/.localvault/vaults/<name>/`. Each secret is stored as an individual encrypted file. There is no single flat database — this makes partial reads and concurrent writes safer.
+A vault is a directory at `~/.localvault/vaults/<name>/`. Secrets are stored together in an encrypted JSON blob plus metadata.
 
 When you unlock:
 1. You type your passphrase
 2. Argon2id derives the master key (slow by design — resists brute force)
-3. The master key decrypts individual secret files on demand
+3. The master key decrypts the vault blob on demand
 4. The master key is optionally cached in Keychain / session file
 
-The master key is **never written to disk** in plaintext. It lives in memory for the duration of the session.
+The vault data is encrypted at rest. The derived master key may be cached in Keychain or LocalVault's file fallback with a TTL so CLI and MCP calls can reuse the unlock.
 
 ## Session caching
 
-`eval $(localvault unlock)` exports `LOCALVAULT_SESSION` — a base64-encoded master key cached in memory.
+`eval $(localvault unlock)` exports `LOCALVAULT_SESSION` — a base64-encoded session token for the active shell.
 
 On macOS, the session is also stored in Keychain with an 8-hour TTL. This avoids re-prompting on new terminal windows during the same working session.
 
