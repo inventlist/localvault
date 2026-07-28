@@ -1,3 +1,6 @@
 *.gem
 .bundle/
 vendor/bundle/
+
+# Planning source is local + Kuickr; the shared harness lives in ../74-dev-docs.
+docs/plans/

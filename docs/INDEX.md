@@ -1,0 +1,26 @@
+# LocalVault Docs Index
+
+## Start Here
+
+- [PILLARS.md](PILLARS.md) — project pillar lock
+- `plans/00-delivery-sequence.md` — implementation order; local and Kuickr only
+- `plans/01-contextual-cli-help.md` — approved CLI help and group design
+- `plans/02-mcp-safe-secret-use.md` — approved MCP safety and setup design
+- `plans/03-contextual-cli-help-implementation.md` — executable CLI plan
+- `plans/04-mcp-safe-secret-use-implementation.md` — executable MCP plan
+
+The shared documentation rules and templates live in `../../74-dev-docs`.
+Project plans are intentionally ignored by Git and published at
+<https://kuickr.co/dev-docs-74/localvault-plans>.
+
+## Product Documentation
+
+- [organizing-secrets.md](organizing-secrets.md) — naming and grouping secrets
+- [RELEASING.md](RELEASING.md) — release workflow
+- `backlog/` — feature backlogs and PRDs
+- `sessions/` — dated implementation records
+
+## Coordination
+
+- `agents/00-roster.md` — stable agent aliases and roles
+- `threads/` — living agent-to-agent conversations
