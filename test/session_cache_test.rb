@@ -1,6 +1,7 @@
 require_relative "test_helper"
 require_relative "../lib/localvault"
 require_relative "../lib/localvault/session_cache"
+require "rbconfig"
 
 class SessionCacheTest < Minitest::Test
   include LocalVault::TestHelper
@@ -56,5 +57,18 @@ class SessionCacheTest < Minitest::Test
     LocalVault::SessionCache.clear("x")
     assert_equal @master_key, LocalVault::SessionCache.get("default")
     assert_nil                LocalVault::SessionCache.get("x")
+  end
+
+  def test_command_runner_returns_within_timeout
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    result = LocalVault::SessionCache.send(
+      :run_command,
+      [RbConfig.ruby, "-e", "sleep 2; puts 'late'"],
+      timeout: 0.05
+    )
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+    assert_nil result
+    assert_operator elapsed, :<, 0.5
   end
 end

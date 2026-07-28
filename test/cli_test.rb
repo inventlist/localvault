@@ -23,6 +23,143 @@ class CLITest < Minitest::Test
 
   # --- version ---
 
+  def test_groups_searches_names_without_revealing_values
+    vault = create_test_vault("default")
+    vault.set("STRIPE.API_KEY", "sk-secret")
+    vault.set("STRATUS_URL", "https://secret.example")
+    vault.set("AWS_KEY", "akia-secret")
+
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[groups str]) }
+      assert_includes out, "STRATUS"
+      assert_includes out, "STRIPE"
+      refute_includes out, "sk-secret"
+      refute_includes out, "https://secret.example"
+    end
+  end
+
+  def test_show_group_resolves_unique_prefix
+    vault = create_test_vault("default")
+    vault.set("STRIPE.API_KEY", "sk-secret")
+    vault.set("AWS_KEY", "akia-secret")
+
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[show --group str]) }
+      assert_includes out, "STRIPE"
+      assert_includes out, "API_KEY"
+      refute_includes out, "AWS_KEY"
+      refute_includes out, "sk-secret"
+    end
+  end
+
+  def test_show_group_can_select_names_that_match_old_internal_sentinels
+    vault = create_test_vault("default")
+    vault.set("__all__.KEY", "all-secret")
+    vault.set("__off__.KEY", "off-secret")
+
+    with_session("default") do
+      all_out, = capture_io { LocalVault::CLI.start(%w[show --group __all__]) }
+      off_out, = capture_io { LocalVault::CLI.start(%w[show --group __off__]) }
+
+      assert_includes all_out, "__all__"
+      assert_includes all_out, "KEY"
+      refute_includes all_out, "__off__"
+      assert_includes off_out, "__off__"
+      assert_includes off_out, "KEY"
+      refute_includes off_out, "__all__"
+    end
+  end
+
+  def test_show_group_ambiguity_returns_candidates_and_nonzero_status
+    vault = create_test_vault("default")
+    vault.set("STRIPE.API_KEY", "never-print-one")
+    vault.set("STRATUS_URL", "never-print-two")
+
+    with_session("default") do
+      _out, err = capture_io do
+        status = LocalVault::CLI.start(%w[show --group str])
+        assert_equal 1, status
+      end
+      assert_includes err, "Multiple groups match `str`"
+      assert_includes err, "STRATUS"
+      assert_includes err, "STRIPE"
+      assert_includes err, "localvault show --group STRIPE"
+      refute_includes err, "never-print"
+    end
+  end
+
+  def test_show_group_absence_returns_search_hint_and_nonzero_status
+    create_test_vault("default")
+
+    with_session("default") do
+      _out, err = capture_io do
+        status = LocalVault::CLI.start(%w[show --group missing])
+        assert_equal 1, status
+      end
+      assert_includes err, "No group matches `missing`"
+      assert_includes err, "localvault groups missing"
+    end
+  end
+
+  def test_set_group_saves_using_dot_notation
+    vault = create_test_vault("default")
+
+    with_session("default") do
+      out, = capture_io { LocalVault::CLI.start(%w[set --group STRIPE API_KEY sk-secret]) }
+      assert_equal "sk-secret", vault.get("STRIPE.API_KEY")
+      assert_includes out, "Stored as:"
+      refute_includes out, "sk-secret"
+    end
+  end
+
+  def test_set_group_rejects_invalid_segments_without_reflecting_inputs
+    create_test_vault("default")
+
+    with_session("default") do
+      _out, err = capture_io do
+        status = LocalVault::CLI.start(["set", "--group", "bad-group", "API_KEY", "never-print-this"])
+        assert_equal 1, status
+      end
+      assert_includes err, "letters, digits, and underscores"
+      refute_includes err, "bad-group"
+      refute_includes err, "API_KEY"
+      refute_includes err, "never-print-this"
+    end
+  end
+
+  def test_set_group_rejects_scalar_collision_without_reflecting_inputs
+    vault = create_test_vault("default")
+    vault.set("STRIPE", "occupied")
+
+    with_session("default") do
+      _out, err = capture_io do
+        status = LocalVault::CLI.start(%w[set --group STRIPE API_KEY never-print-this])
+        assert_equal 1, status
+      end
+      assert_includes err, "that name is already used by a secret key"
+      refute_includes err, "STRIPE"
+      refute_includes err, "API_KEY"
+      refute_includes err, "never-print-this"
+    end
+  end
+
+  def test_set_group_rejects_case_ambiguous_existing_names
+    vault = create_test_vault("default")
+    vault.set("Stripe.KEY", "one")
+    vault.set("STRIPE.KEY", "two")
+
+    with_session("default") do
+      _out, err = capture_io do
+        status = LocalVault::CLI.start(%w[set --group stripe API_KEY never-print-this])
+        assert_equal 1, status
+      end
+      assert_includes err, "group name is ambiguous"
+      assert_includes err, "Stripe"
+      assert_includes err, "STRIPE"
+      refute_includes err, "never-print-this"
+    end
+  end
+
   def test_version
     out, = capture_io { LocalVault::CLI.start(%w[version]) }
     assert_equal "localvault #{LocalVault::VERSION}\n", out
@@ -867,6 +1004,67 @@ class CLITest < Minitest::Test
   end
 
   # --- install-mcp ---
+
+  def test_mcp_help_explains_install_check_and_injection_first_use
+    out, = capture_io { LocalVault::CLI.start(%w[help mcp]) }
+
+    assert_includes out, "localvault install-mcp"
+    assert_includes out, "localvault mcp --check"
+    assert_includes out, "localvault_build_exec"
+    assert_includes out, "Do not run `localvault mcp` directly"
+  end
+
+  def test_set_help_teaches_both_group_save_forms
+    out, = capture_io { LocalVault::CLI.start(%w[help set]) }
+
+    assert_includes out, "localvault set --group GROUP KEY VALUE"
+    assert_includes out, "localvault set GROUP.KEY VALUE"
+    assert_includes out, "localvault groups [QUERY]"
+  end
+
+  def test_mcp_check_reports_ready_without_starting_stdio_server
+    create_test_vault("default")
+
+    with_session("default") do
+      status = nil
+      out, = capture_io { status = LocalVault::CLI.start(%w[mcp --check]) }
+      assert_equal 0, status
+      assert_includes out, "MCP readiness: ready"
+      assert_includes out, "LocalVault #{LocalVault::VERSION}"
+      assert_includes out, "Home: #{@test_home}"
+      assert_includes out, "Active vault: default"
+      assert_includes out, "MCP tools:"
+      assert_includes out, "list_secrets"
+      assert_includes out, "localvault_build_exec"
+      assert_includes out, "Plaintext gate: enabled"
+      assert_includes out, "Server instructions: enabled"
+    end
+  end
+
+  def test_mcp_check_returns_nonzero_when_active_vault_is_locked
+    create_test_vault("default")
+
+    out, = capture_io do
+      status = LocalVault::CLI.start(%w[mcp --check])
+      assert_equal 1, status
+    end
+    assert_includes out, "MCP readiness: locked"
+    assert_includes out, "localvault show"
+  end
+
+  def test_mcp_check_only_checks_the_active_vault
+    create_test_vault("default")
+    create_test_vault("other")
+    calls = []
+    original = LocalVault::SessionCache.method(:get)
+    LocalVault::SessionCache.define_singleton_method(:get) { |name| calls << name; nil }
+
+    capture_io { LocalVault::CLI.start(%w[mcp --check]) }
+
+    assert_equal ["default"], calls
+  ensure
+    LocalVault::SessionCache.define_singleton_method(:get, original) if original
+  end
 
   # Claude Code delegates to `claude mcp add --scope user` — test via stub
   def test_install_mcp_claude_code_calls_cli

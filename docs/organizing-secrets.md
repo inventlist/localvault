@@ -35,6 +35,14 @@ Vault: default  (4 secrets)
 
 `localvault exec -- rails s` injects all keys as-is.
 
+Discover inferred prefix groups without exposing values:
+
+```bash
+localvault groups
+localvault groups str
+localvault show --group STRIPE
+```
+
 **Best for:** personal machines, single-project vaults.
 
 ---
@@ -50,6 +58,14 @@ localvault set platepose.DATABASE_URL     postgres://... -v intellectaco
 
 localvault set inventlist.SECRET_KEY_BASE  xyz789   -v intellectaco
 localvault set inventlist.DATABASE_URL     postgres://... -v intellectaco
+```
+
+The guided form stores the same dot-notation key while making the group
+relationship explicit:
+
+```bash
+localvault set --group platepose DATABASE_URL postgres://... -v intellectaco
+# Stored as platepose.DATABASE_URL
 ```
 
 `localvault show -v intellectaco` renders each project as its own group:
@@ -187,11 +203,14 @@ localvault switch default      # switch back
 |------|---------|
 | Simple key | `localvault set KEY value` |
 | Nested key | `localvault set project.KEY value -v vault` |
+| Save into group | `localvault set --group project KEY value -v vault` |
+| Search groups safely | `localvault groups [QUERY] -v vault` |
 | Import from file | `localvault import file.env -v vault --project app` |
 | Rename key | `localvault rename OLD NEW` |
 | Copy to vault | `localvault copy KEY --to other-vault` |
 | Delete group | `localvault delete project -v vault` |
 | View all grouped | `localvault show --group` |
+| View matching group | `localvault show --group QUERY` |
 | View one project | `localvault show -p platepose -v vault` |
 | Inject all (flat) | `localvault exec -- cmd` |
 | Inject one project | `localvault exec -p platepose -v vault -- cmd` |

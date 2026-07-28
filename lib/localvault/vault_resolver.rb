@@ -33,6 +33,17 @@ module LocalVault
       }
     end
 
+    def self.readiness_status(name = nil)
+      result = resolve(name)
+      {
+        "localvault_home" => Config.root_path,
+        "active_vault" => result.active_vault,
+        "active_vault_source" => result.active_vault_source,
+        "session_vault" => result.session_vault,
+        "active_vault_unlocked" => !result.vault.nil?
+      }
+    end
+
     def self.active_vault_name(name = nil)
       return [name, "argument"] if name && !name.empty?
       return [ENV["LOCALVAULT_VAULT"], "env"] if ENV["LOCALVAULT_VAULT"] && !ENV["LOCALVAULT_VAULT"].empty?

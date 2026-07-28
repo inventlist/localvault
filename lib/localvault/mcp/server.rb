@@ -72,7 +72,10 @@ module LocalVault
           success_response(id, {
             "protocolVersion" => "2025-11-25",
             "capabilities"    => { "tools" => {} },
-            "serverInfo"      => { "name" => "localvault", "version" => LocalVault::VERSION }
+            "serverInfo"      => { "name" => "localvault", "version" => LocalVault::VERSION },
+            "instructions"    => "Do not retrieve plaintext secrets for commands, API calls, evaluation, or configuration. " \
+                                 "Call list_secrets to discover names, then localvault_build_exec to construct process-scoped injection. " \
+                                 "Use get_secret with allow_plaintext: true only when the user task explicitly requires the value itself."
           })
         when "tools/list"
           success_response(id, { "tools" => Tools::DEFINITIONS })

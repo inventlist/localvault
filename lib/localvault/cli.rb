@@ -6,9 +6,92 @@ require_relative "env_projection"
 require_relative "key_lookup"
 require_relative "session_cache"
 require_relative "vault_resolver"
+require_relative "group_catalog"
 
 module LocalVault
   class CLI < Thor
+    USAGE_EXIT_STATUS = 1
+    GROUP_ALL_SENTINEL = "\0localvault-all-groups"
+    GROUP_OFF_SENTINEL = "\0localvault-groups-off"
+    CommandStatus = Data.define(:code) do
+      def self.ok
+        new(0)
+      end
+
+      def self.error
+        new(1)
+      end
+    end
+    class GroupSaveError < Thor::Error
+      attr_reader :kind, :candidates
+
+      def initialize(kind, candidates: [])
+        @kind = kind
+        @candidates = candidates
+        super("group save failed")
+      end
+
+      def exit_status
+        1
+      end
+    end
+    class GroupSelectionError < Thor::Error
+      attr_reader :kind, :query, :candidates
+
+      def initialize(kind, query:, candidates: [])
+        @kind = kind
+        @query = query
+        @candidates = candidates
+        super("group selection failed")
+      end
+
+      def exit_status
+        1
+      end
+    end
+
+    def self.start(given_args = ARGV, config = {})
+      require_relative "cli/error_presenter"
+      config[:shell] ||= Thor::Base.shell.new
+      result = dispatch(nil, normalize_legacy_group_option(given_args.dup), nil, config)
+      result.is_a?(CommandStatus) ? result.code : 0
+    rescue Thor::Error => error
+      ErrorPresenter.new(self, given_args).render(error)
+      error.respond_to?(:exit_status) ? error.exit_status : USAGE_EXIT_STATUS
+    rescue Errno::EPIPE
+      0
+    end
+
+    def self.normalize_legacy_group_option(arguments)
+      command = arguments.first
+      matches = all_commands.keys.select { |name| name.start_with?(command.to_s) }
+      return arguments unless command == "show" || matches == ["show"]
+
+      normalized = []
+      index = 0
+      while index < arguments.length
+        argument = arguments[index]
+        if argument == "--"
+          normalized.concat(arguments[index..])
+          break
+        end
+        if argument == "--group" && arguments[index + 1]&.match?(/\A(?:true|false|t|f)\z/i)
+          enabled = arguments[index + 1].match?(/\A(?:true|t)\z/i)
+          normalized << "--group=#{enabled ? GROUP_ALL_SENTINEL : GROUP_OFF_SENTINEL}"
+          index += 2
+          next
+        end
+
+        case argument
+        when /\A--group=(?:true|t)\z/i then normalized << "--group=#{GROUP_ALL_SENTINEL}"
+        when /\A--group=(?:false|f)\z/i, "--no-group", "--skip-group" then normalized << "--group=#{GROUP_OFF_SENTINEL}"
+        else normalized << argument
+        end
+        index += 1
+      end
+      normalized
+    end
+
     class_option :vault, aliases: "-v", type: :string, desc: "Vault name"
 
     def self.help(shell, subcommand = false)
@@ -23,8 +106,10 @@ module LocalVault
       shell.say ""
       shell.say "SECRETS"
       shell.say "  localvault set KEY VALUE      Store a secret"
+      shell.say "  localvault set --group G K V  Store a secret inside group G"
       shell.say "  localvault get KEY            Retrieve a secret"
       shell.say "  localvault show               Display all secrets (masked by default)"
+      shell.say "  localvault groups [QUERY]     List or search stored groups (names only)"
       shell.say "  localvault list               List secret key names"
       shell.say "  localvault delete KEY         Remove a secret"
       shell.say "  localvault import FILE        Bulk-import from .env / .json / .yml"
@@ -71,6 +156,8 @@ module LocalVault
       shell.say "AI / MCP"
       shell.say "  localvault install-mcp        Configure MCP server in your AI tool"
       shell.say "  localvault mcp                Start MCP server (stdio)"
+      shell.say "  localvault mcp --check        Check setup and active-vault readiness"
+      shell.say "  Agents: list names, then use localvault_build_exec for safe injection"
       shell.say ""
       shell.say "LEGACY SHARING  (pre-v1.2 direct share, still works as fallback)"
       shell.say "  localvault keygen             Generate X25519 keypair (same as `keys generate`)"
@@ -123,14 +210,38 @@ module LocalVault
 \x05    localvault set platepose.SECRET_KEY_BASE abc123          -v intellectaco
 \x05    localvault set inventlist.STRIPE_KEY sk_live_abc123      -v intellectaco
 
+      GUIDED GROUP SAVE (same storage, easier to discover):
+\x05    localvault set --group GROUP KEY VALUE
+\x05    localvault set GROUP.KEY VALUE
+\x05    localvault groups [QUERY]
+
       The dot separates project from key name. One vault can hold many projects.
       Use `localvault show -p platepose -v vault` to view a single project.
       Use `localvault import` to bulk-load from a .env, .json, or .yml file.
     DESC
+    method_option :group, type: :string, desc: "Store KEY and VALUE inside this named group"
     def set(key, value)
       vault = open_vault!
-      vault.set(key, value)
-      $stdout.puts "Set #{key} in vault '#{vault.name}'"
+      if options[:group]
+        group = canonical_group_name(vault, options[:group])
+        validate_group_segment!(group)
+        validate_group_segment!(key)
+        raise GroupSaveError, :collision if vault.all.key?(group) && !vault.all[group].is_a?(Hash)
+        vault.set("#{group}.#{key}", value)
+        $stdout.puts "Set #{key} in group `#{group}` in vault `#{vault.name}`."
+        $stdout.puts
+        $stdout.puts "Stored as:"
+        $stdout.puts "  #{group}.#{key}"
+      else
+        vault.set(key, value)
+        $stdout.puts "Set #{key} in vault '#{vault.name}'"
+      end
+    rescue Vault::InvalidKeyName => e
+      raise GroupSaveError, :invalid if options[:group]
+      abort_with e.message
+    rescue RuntimeError => e
+      raise GroupSaveError, :collision if options[:group]
+      abort_with e.message
     end
 
     desc "get KEY", "Retrieve a secret value by key"
@@ -183,6 +294,30 @@ module LocalVault
     def list
       vault = open_vault!
       vault.list.each { |key| $stdout.puts key }
+    end
+
+    desc "groups [QUERY]", "List or search stored secret groups without revealing values"
+    long_desc <<~DESC
+      Discover dot-notation namespaces and flat-key prefix groups.
+
+\x05    localvault groups
+\x05    localvault groups str
+\x05    localvault show --group STRIPE
+\x05    localvault set --group STRIPE API_KEY VALUE
+    DESC
+    def groups(query = nil)
+      vault = open_vault!
+      matches = GroupCatalog.new(vault.all).search(query)
+      if matches.empty?
+        $stdout.puts "No groups match #{query}"
+        return
+      end
+
+      heading = query ? "Groups matching `#{query}`" : "Groups"
+      $stdout.puts "#{heading} in vault `#{vault.name}`:"
+      $stdout.puts
+      $stdout.printf("  %-20s %-6s %s\n", "Group", "Keys", "Kind")
+      matches.each { |group| $stdout.printf("  %-20s %-6d %s\n", group.name, group.count, group.kind) }
     end
 
     desc "delete KEY", "Remove a secret or entire project group"
@@ -350,14 +485,15 @@ module LocalVault
 \x05    localvault show -p platepose -v intellectaco  # one project only
 \x05    localvault show -p platepose -v intellectaco --reveal
     DESC
-    method_option :group,   type: :boolean, default: false, desc: "Group flat keys by common prefix"
+    method_option :group, type: :string, lazy_default: GROUP_ALL_SENTINEL, desc: "Show all groups or one group by name"
     method_option :reveal,  type: :boolean, default: false, desc: "Show full values instead of masking"
     method_option :project, aliases: "-p", type: :string,   desc: "Show only this project group"
     def show
       vault = open_vault!
       secrets = vault.all
 
-      if secrets.empty?
+      named_group_query = options[:group] && ![GROUP_ALL_SENTINEL, GROUP_OFF_SENTINEL].include?(options[:group])
+      if secrets.empty? && !named_group_query
         $stdout.puts "No secrets in vault '#{vault.name}'."
         return
       end
@@ -369,7 +505,17 @@ module LocalVault
           return
         end
         render_table(group.sort.to_h, "#{vault.name}/#{options[:project]}", reveal: options[:reveal])
-      elsif options[:group] || secrets.values.any? { |v| v.is_a?(Hash) }
+      elsif options[:group] && ![GROUP_ALL_SENTINEL, GROUP_OFF_SENTINEL].include?(options[:group])
+        match = GroupCatalog.new(secrets).resolve(options[:group])
+        if match.group
+          entries = match.group.entries.to_h { |entry| [entry.label, entry.value] }
+          render_table(entries, "#{vault.name}/#{match.group.name}", reveal: options[:reveal])
+        elsif match.kind == :ambiguous
+          raise GroupSelectionError.new(:ambiguous, query: options[:group], candidates: match.groups.map(&:name))
+        else
+          raise GroupSelectionError.new(:absent, query: options[:group])
+        end
+      elsif options[:group] != GROUP_OFF_SENTINEL && (options[:group] || secrets.values.any? { |v| v.is_a?(Hash) })
         render_grouped_table(secrets, vault.name, reveal: options[:reveal])
       else
         render_table(secrets.sort.to_h, vault.name, reveal: options[:reveal])
@@ -468,8 +614,44 @@ module LocalVault
     end
 
     desc "mcp", "Start MCP server (stdio)"
+    long_desc <<~DESC
+      Start LocalVault's stdio MCP server for an AI client.
+
+      Install and verify:
+\x05    localvault install-mcp [claude-code|cursor|windsurf]
+\x05    localvault mcp --check
+\x05    localvault show
+
+      Do not run `localvault mcp` directly to test it: stdio servers wait for
+      JSON-RPC input and therefore appear idle. Use `--check`, then restart the
+      configured AI client.
+
+      Agents should call `list_secrets`, then `localvault_build_exec` to inject
+      secrets into a subprocess. Plaintext `get_secret` requires the explicit
+      `allow_plaintext: true` acknowledgement.
+    DESC
+    method_option :check, type: :boolean, default: false, desc: "Check installation and active-vault readiness, then exit"
     def mcp
-      require "localvault/mcp/server"
+      if options[:check]
+        require_relative "mcp/tools"
+        status = VaultResolver.readiness_status(options[:vault])
+        ready = status["active_vault_unlocked"]
+        tool_names = MCP::Tools::DEFINITIONS.map { |definition| definition.fetch("name") }
+        $stdout.puts "LocalVault #{VERSION}"
+        $stdout.puts "Home: #{Config.root_path}"
+        $stdout.puts "MCP readiness: #{ready ? "ready" : "locked"}"
+        $stdout.puts "Active vault: #{status["active_vault"]} (#{status["active_vault_source"]})"
+        $stdout.puts "Vault session: #{ready ? "available" : "unlock with `localvault show`"}"
+        $stdout.puts "MCP tools: #{tool_names.join(", ")}"
+        $stdout.puts "Plaintext gate: enabled"
+        $stdout.puts "Server instructions: enabled"
+        $stdout.puts
+        $stdout.puts "Safe agent workflow: list_secrets → localvault_build_exec → run the generated command"
+        $stdout.puts "Plaintext retrieval is opt-in with allow_plaintext: true."
+        return ready ? CommandStatus.ok : CommandStatus.error
+      end
+
+      require_relative "mcp/server"
       MCP::Server.new.start
     end
 
@@ -1282,7 +1464,7 @@ module LocalVault
     end
 
     def self.exit_on_failure?
-      true
+      false
     end
 
     no_commands do
@@ -1306,6 +1488,23 @@ module LocalVault
     end
 
     private
+
+    def canonical_group_name(vault, supplied)
+      groups = GroupCatalog.new(vault.all).groups
+      return supplied if groups.any? { |group| group.name == supplied }
+
+      insensitive = groups.select { |group| group.name.casecmp?(supplied) }
+      return insensitive.first.name if insensitive.one?
+      raise GroupSaveError.new(:ambiguous, candidates: insensitive.map(&:name)) if insensitive.length > 1
+
+      supplied
+    end
+
+    def validate_group_segment!(segment)
+      unless segment.match?(Vault::KEY_SEGMENT_PATTERN) && segment.length <= 128
+        raise GroupSaveError, :invalid
+      end
+    end
 
     # ── Demo data ──────────────────────────────────────────────────
     DEMO_DATA = {
@@ -1694,9 +1893,11 @@ module LocalVault
     def print_next_steps(client_name)
       $stdout.puts ""
       $stdout.puts "Next steps:"
-      $stdout.puts "  1. Restart #{client_name}"
-      $stdout.puts "  2. Unlock your vault once:  localvault show"
-      $stdout.puts "  3. The AI can now access secrets from your default vault"
+      $stdout.puts "  1. Unlock your vault once:  localvault show"
+      $stdout.puts "  2. Verify readiness:         localvault mcp --check"
+      $stdout.puts "  3. Restart #{client_name}"
+      $stdout.puts "  4. Ask the agent to list names, then use localvault_build_exec"
+      $stdout.puts "     for process injection. Plaintext get_secret is explicit opt-in."
       $stdout.puts "     Switch vaults: localvault switch <vault>"
     end
 

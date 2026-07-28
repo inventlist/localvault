@@ -1,6 +1,7 @@
 require "json"
 require_relative "../key_lookup"
 require_relative "../version"
+require_relative "exec_command_builder"
 
 module LocalVault
   module MCP
@@ -17,19 +18,21 @@ module LocalVault
       DEFINITIONS = [
         {
           "name" => "get_secret",
-          "description" => "Retrieve a secret value by key from a localvault vault",
+          "description" => "Reveal plaintext only when the task truly requires the value in model context. Prefer localvault_build_exec for commands, evaluations, and API calls.",
           "inputSchema" => {
             "type" => "object",
             "properties" => {
-              "key"   => { "type" => "string", "description" => "The secret key to retrieve" },
+              "key"   => { "type" => "string", "description" => "The exact secret key to reveal" },
+              "allow_plaintext" => { "type" => "boolean", "description" => "Must be true to acknowledge that plaintext will enter model context" },
               **VAULT_PARAM
             },
-            "required" => ["key"]
-          }
+            "required" => ["key", "allow_plaintext"]
+          },
+          "annotations" => { "readOnlyHint" => true, "openWorldHint" => false }
         },
         {
           "name" => "list_secrets",
-          "description" => "List all secret keys in a localvault vault",
+          "description" => "Discover secret names without values. After selecting names, use localvault_build_exec to inject them into a process.",
           "inputSchema" => {
             "type" => "object",
             "properties" => {
@@ -38,7 +41,37 @@ module LocalVault
               **VAULT_PARAM
             },
             "required" => []
-          }
+          },
+          "annotations" => { "readOnlyHint" => true, "openWorldHint" => false }
+        },
+        {
+          "name" => "localvault_build_exec",
+          "description" => "Build, but never execute, a shell-safe localvault exec command that injects secrets directly into a subprocess without exposing values to the model.",
+          "inputSchema" => {
+            "type" => "object",
+            "properties" => {
+              "command" => { "type" => "array", "items" => { "type" => "string" }, "description" => "Command argv to run with injected secrets" },
+              "vault" => { "type" => "string", "description" => "Vault name" },
+              "project" => { "type" => "string", "description" => "Dot-notation project group to inject without a prefix" },
+              "only" => { "type" => "array", "items" => { "type" => "string" }, "description" => "Exact keys or GROUP.* selectors" },
+              "except" => { "type" => "array", "items" => { "type" => "string" }, "description" => "Selectors to exclude" },
+              "map" => { "type" => "object", "additionalProperties" => { "type" => "string" }, "description" => "Vault-key to environment-variable mappings" },
+              "profile" => { "type" => "string", "enum" => ["aws"], "description" => "Built-in mapping profile" }
+            },
+            "required" => ["command"]
+          },
+          "outputSchema" => {
+            "type" => "object",
+            "properties" => {
+              "command" => { "type" => "string" },
+              "exposes_plaintext" => { "type" => "boolean" },
+              "executes_command" => { "type" => "boolean" },
+              "next_action" => { "type" => "string" }
+            },
+            "required" => %w[command exposes_plaintext executes_command next_action],
+            "additionalProperties" => false
+          },
+          "annotations" => { "readOnlyHint" => true, "openWorldHint" => false }
         },
         {
           "name" => "localvault_whoami",
@@ -47,7 +80,8 @@ module LocalVault
             "type" => "object",
             "properties" => { **VAULT_PARAM },
             "required" => []
-          }
+          },
+          "annotations" => { "readOnlyHint" => true, "openWorldHint" => false }
         },
         {
           "name" => "set_secret",
@@ -60,6 +94,12 @@ module LocalVault
               **VAULT_PARAM
             },
             "required" => ["key", "value"]
+          },
+          "annotations" => {
+            "readOnlyHint" => false,
+            "destructiveHint" => true,
+            "idempotentHint" => false,
+            "openWorldHint" => false
           }
         },
         {
@@ -72,6 +112,12 @@ module LocalVault
               **VAULT_PARAM
             },
             "required" => ["key"]
+          },
+          "annotations" => {
+            "readOnlyHint" => false,
+            "destructiveHint" => true,
+            "idempotentHint" => true,
+            "openWorldHint" => false
           }
         }
       ].freeze
@@ -96,12 +142,21 @@ module LocalVault
 
         vault_name = arguments["vault"]
         return whoami(status_resolver.call(vault_name)) if name == "localvault_whoami"
+        return build_exec(arguments) if name == "localvault_build_exec"
+        return required_argument_error("key") if name == "get_secret" && !present_string?(arguments["key"])
+        if name == "get_secret" && arguments["allow_plaintext"] != true
+          return error_result(
+            "Plaintext retrieval is blocked by default. For authentication or an external command, call " \
+            "localvault_build_exec instead. Retry get_secret with allow_plaintext=true only when the user " \
+            "explicitly needs the secret text or injection cannot complete the task."
+          )
+        end
 
         vault = vault_resolver.call(vault_name)
 
         unless vault
           hint = vault_name ? "localvault show -v #{vault_name}" : "localvault show"
-          return error_result("No unlocked vault session. Run: #{hint}")
+          return error_result("No unlocked vault session. Run `localvault mcp --check`, then unlock with: #{hint}")
         end
 
         case name
@@ -138,7 +193,12 @@ module LocalVault
         keys = vault.list
         keys = keys.select { |key| key.start_with?(prefix) } if prefix && !prefix.empty?
         keys = keys.select { |key| key.downcase.include?(query.downcase) } if query && !query.empty?
-        keys.empty? ? text_result("No secrets stored") : text_result(keys.join("\n"))
+        result = keys.empty? ? text_result("No secrets stored") : text_result(keys.join("\n"))
+        result["content"] << {
+          "type" => "text",
+          "text" => "Next: call localvault_build_exec with command argv and optional only/project mappings. Do not copy secret values."
+        }
+        result
       end
 
       def self.set_secret(key, value, vault)
@@ -180,6 +240,23 @@ module LocalVault
         text_result(text).merge("structuredContent" => structured)
       end
 
+      def self.build_exec(arguments)
+        result = ExecCommandBuilder.new(
+          command: arguments["command"],
+          vault: arguments["vault"],
+          project: arguments["project"],
+          only: arguments["only"],
+          except: arguments["except"],
+          map: arguments["map"],
+          profile: arguments["profile"]
+        ).build
+        text_result(
+          "Built command (not executed):\n#{result["command"]}\n\n#{result["next_action"]}"
+        ).merge("structuredContent" => result)
+      rescue InputValidation::InvalidInput => e
+        error_result(e.message)
+      end
+
       def self.candidate_message(header, matches)
         ([header] + matches.map { |match| "  #{match}" }).join("\n")
       end
@@ -200,7 +277,7 @@ module LocalVault
         error_result("Argument '#{name}' must be a string")
       end
 
-      private_class_method :get_secret, :list_secrets, :set_secret, :delete_secret,
+      private_class_method :get_secret, :list_secrets, :set_secret, :delete_secret, :build_exec,
         :text_result, :error_result, :whoami, :candidate_message,
         :present_string?, :optional_string?, :required_argument_error, :string_argument_error
     end

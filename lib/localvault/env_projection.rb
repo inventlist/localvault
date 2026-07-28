@@ -1,3 +1,5 @@
+require_relative "input_validation"
+
 module LocalVault
   module EnvProjection
     class InvalidMapping < StandardError; end
@@ -34,7 +36,10 @@ module LocalVault
     def self.parse_selectors(value)
       values = Array(value).compact.flat_map { |v| v.to_s.split(",") }
       selectors = values.map(&:strip).reject(&:empty?)
+      selectors.each { |selector| InputValidation.selector!(selector) }
       selectors.empty? ? nil : selectors
+    rescue InputValidation::InvalidInput => e
+      raise InvalidMapping, e.message
     end
 
     def self.parse_map(value)
@@ -43,10 +48,12 @@ module LocalVault
 
         key, env_name = pair.split("=", 2).map(&:strip)
         raise InvalidMapping, "Invalid map '#{pair}'. Use KEY=ENV_NAME" if key.to_s.empty? || env_name.to_s.empty?
-        raise InvalidMapping, "Invalid environment variable name '#{env_name}'" unless safe_env_name?(env_name)
+        InputValidation.mapping!(key, env_name)
 
         hash[key] = env_name
       end
+    rescue InputValidation::InvalidInput => e
+      raise InvalidMapping, e.message
     end
 
     def self.profile_config(profile)

@@ -1,6 +1,6 @@
 require "base64"
 require "fileutils"
-require "shellwords"
+require "open3"
 
 module LocalVault
   # Caches derived master keys to avoid re-prompting passphrase on every command.
@@ -95,8 +95,11 @@ module LocalVault
 
     def self.keychain_get(vault_name)
       if macos?
-        out = `security find-generic-password -a #{Shellwords.escape(vault_name)} -s #{Shellwords.escape(KEYCHAIN_SERVICE)} -w 2>/dev/null`.chomp
-        return out if $?.success? && !out.empty?
+        out = run_command(
+          ["security", "find-generic-password", "-a", vault_name, "-s", KEYCHAIN_SERVICE, "-w"],
+          timeout: 2
+        )
+        return out unless out.nil? || out.empty?
       end
       # File fallback (Linux, or macOS when Keychain unavailable)
       file = session_file(vault_name)
@@ -141,6 +144,29 @@ module LocalVault
       end
       # Always clean file fallback
       FileUtils.rm_f(session_file(vault_name))
+    end
+
+    def self.run_command(argv, timeout:)
+      output = nil
+      Open3.popen3(*argv) do |stdin, stdout, stderr, wait_thread|
+        stdin.close
+        unless wait_thread.join(timeout)
+          Process.kill("TERM", wait_thread.pid)
+          unless wait_thread.join(0.1)
+            Process.kill("KILL", wait_thread.pid)
+            wait_thread.join
+          end
+          return nil
+        end
+
+        output = stdout.read.chomp if wait_thread.value.success?
+        stderr.close
+      rescue Errno::ESRCH
+        return nil
+      end
+      output
+    rescue Errno::ENOENT
+      nil
     end
 
   end

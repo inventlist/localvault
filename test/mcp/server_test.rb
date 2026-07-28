@@ -1,5 +1,6 @@
 require_relative "../test_helper"
 require_relative "../../lib/localvault/cli"
+require_relative "../../lib/localvault/mcp/tools"
 
 class MCPServerTest < Minitest::Test
   include LocalVault::TestHelper
@@ -41,6 +42,8 @@ class MCPServerTest < Minitest::Test
       assert_equal LocalVault::VERSION, response.dig("result", "serverInfo", "version")
       assert_equal "2025-11-25", response.dig("result", "protocolVersion")
       assert response.dig("result", "capabilities", "tools")
+      assert_includes response.dig("result", "instructions"), "localvault_build_exec"
+      assert_includes response.dig("result", "instructions"), "Do not retrieve plaintext"
     end
   end
 
@@ -58,13 +61,13 @@ class MCPServerTest < Minitest::Test
 
   # --- tools/list ---
 
-  def test_tools_list_returns_five_tools
+  def test_tools_list_returns_six_tools
     with_vault_session do
       response = send_request("tools/list", {})
       tools = response.dig("result", "tools")
-      assert_equal 5, tools.size
+      assert_equal 6, tools.size
       names = tools.map { |t| t["name"] }.sort
-      assert_equal %w[delete_secret get_secret list_secrets localvault_whoami set_secret], names
+      assert_equal %w[delete_secret get_secret list_secrets localvault_build_exec localvault_whoami set_secret], names
     end
   end
 
@@ -84,7 +87,67 @@ class MCPServerTest < Minitest::Test
       get_tool = response.dig("result", "tools").find { |t| t["name"] == "get_secret" }
       assert_equal "object", get_tool.dig("inputSchema", "type")
       assert_includes get_tool.dig("inputSchema", "required"), "key"
+      assert_includes get_tool.dig("inputSchema", "required"), "allow_plaintext"
+
+      builder = response.dig("result", "tools").find { |tool| tool["name"] == "localvault_build_exec" }
+      assert builder.dig("inputSchema", "properties", "map")
+      refute builder.dig("inputSchema", "properties", "mappings")
+      assert_equal ["aws"], builder.dig("inputSchema", "properties", "profile", "enum")
+      assert_equal %w[command executes_command exposes_plaintext next_action],
+        builder.dig("outputSchema", "required").sort
     end
+  end
+
+  def test_tools_list_has_complete_safety_annotations
+    with_vault_session do
+      tools = send_request("tools/list", {}).dig("result", "tools").to_h { |tool| [tool["name"], tool] }
+
+      %w[localvault_build_exec list_secrets get_secret localvault_whoami].each do |name|
+        assert_equal true, tools.dig(name, "annotations", "readOnlyHint")
+        assert_equal false, tools.dig(name, "annotations", "openWorldHint")
+      end
+      assert_equal(
+        { "readOnlyHint" => false, "destructiveHint" => true, "idempotentHint" => false, "openWorldHint" => false },
+        tools.dig("set_secret", "annotations")
+      )
+      assert_equal(
+        { "readOnlyHint" => false, "destructiveHint" => true, "idempotentHint" => true, "openWorldHint" => false },
+        tools.dig("delete_secret", "annotations")
+      )
+    end
+  end
+
+  def test_build_exec_returns_declared_structured_content_without_resolving_vault
+    response = send_request("tools/call", {
+      "name" => "localvault_build_exec",
+      "arguments" => {
+        "command" => ["aws", "sts", "get-caller-identity"],
+        "only" => ["AWS_IAM.*"],
+        "map" => { "AWS_IAM.access_key_id" => "AWS_ACCESS_KEY_ID" }
+      }
+    })
+
+    structured = response.dig("result", "structuredContent")
+    assert_equal false, structured["exposes_plaintext"]
+    assert_equal false, structured["executes_command"]
+    assert_includes structured["command"], "localvault exec"
+    assert_includes structured["next_action"], "normal shell tool"
+  end
+
+  def test_plaintext_gate_runs_before_vault_resolution_for_false_and_invalid_values
+    calls = 0
+    resolver = ->(_name) { calls += 1; raise "resolver must not run" }
+
+    [nil, false, "true"].each do |allow_plaintext|
+      result = LocalVault::MCP::Tools.call(
+        "get_secret",
+        { "key" => "API_KEY", "allow_plaintext" => allow_plaintext },
+        resolver
+      )
+      assert result["isError"]
+    end
+
+    assert_equal 0, calls
   end
 
   # --- tools/call get_secret ---
@@ -92,7 +155,7 @@ class MCPServerTest < Minitest::Test
   def test_get_secret_returns_value
     with_vault_session do |vault|
       vault.set("API_KEY", "sk-12345")
-      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "API_KEY" } })
+      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "API_KEY", "allow_plaintext" => true } })
       content = response.dig("result", "content")
       assert_equal 1, content.size
       assert_equal "text", content[0]["type"]
@@ -107,7 +170,7 @@ class MCPServerTest < Minitest::Test
     LocalVault::Config.default_vault = "vaultA"
     ENV["LOCALVAULT_SESSION"] = session_token_for("vaultA")
 
-    response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY" } })
+    response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY", "allow_plaintext" => true } })
     assert_equal "from_a", response.dig("result", "content", 0, "text")
   end
 
@@ -122,7 +185,7 @@ class MCPServerTest < Minitest::Test
     ENV["LOCALVAULT_SESSION"] = session_token_for("intellectaco")
 
     stub_keychain(->(name) { name == "devops" ? master_default : nil }) do
-      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY" } })
+      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY", "allow_plaintext" => true } })
       assert_equal "from_devops", response.dig("result", "content", 0, "text")
     end
   end
@@ -137,10 +200,10 @@ class MCPServerTest < Minitest::Test
       require "localvault/mcp/server"
       server = LocalVault::MCP::Server.new(input: StringIO.new, output: StringIO.new)
 
-      ok = server_call(server, "tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY" } })
+      ok = server_call(server, "tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY", "allow_plaintext" => true } })
       assert_equal "value", ok.dig("result", "content", 0, "text")
 
-      locked = server_call(server, "tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY" } })
+      locked = server_call(server, "tools/call", { "name" => "get_secret", "arguments" => { "key" => "KEY", "allow_plaintext" => true } })
       assert locked.dig("result", "isError")
       assert_match(/No unlocked vault session/, locked.dig("result", "content", 0, "text"))
     end
@@ -148,9 +211,26 @@ class MCPServerTest < Minitest::Test
 
   def test_get_secret_missing_key_returns_error
     with_vault_session do
-      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "NOPE" } })
+      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "NOPE", "allow_plaintext" => true } })
       assert response.dig("result", "isError")
       assert_match(/not found/, response.dig("result", "content", 0, "text"))
+    end
+  end
+
+  def test_get_secret_requires_explicit_plaintext_acknowledgement
+    with_vault_session do |vault|
+      vault.set("API_KEY", "never-copy-this")
+
+      response = send_request("tools/call", {
+        "name" => "get_secret",
+        "arguments" => { "key" => "API_KEY" }
+      })
+
+      assert response.dig("result", "isError")
+      text = response.dig("result", "content", 0, "text")
+      assert_includes text, "allow_plaintext"
+      assert_includes text, "localvault_build_exec"
+      refute_includes text, "never-copy-this"
     end
   end
 
@@ -163,6 +243,7 @@ class MCPServerTest < Minitest::Test
       response = send_request("tools/call", { "name" => "list_secrets", "arguments" => {} })
       text = response.dig("result", "content", 0, "text")
       assert_equal "ALPHA\nZEBRA", text
+      assert_includes response.dig("result", "content", 1, "text"), "localvault_build_exec"
       refute response.dig("result", "isError")
     end
   end
@@ -201,7 +282,7 @@ class MCPServerTest < Minitest::Test
       vault.set("AWS_IAM.access_key_id", "akia")
       vault.set("AWS_IAM.secret_access_key", "secret")
 
-      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "AWS_IAM" } })
+      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "AWS_IAM", "allow_plaintext" => true } })
       text = response.dig("result", "content", 0, "text")
       assert response.dig("result", "isError")
       assert_match(/Multiple keys match 'AWS_IAM'/, text)
@@ -215,7 +296,7 @@ class MCPServerTest < Minitest::Test
     with_vault_session do |vault|
       vault.set("CLOUDFLARE_API_TOKEN", "cf-secret")
 
-      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "cloudflare" } })
+      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "cloudflare", "allow_plaintext" => true } })
       text = response.dig("result", "content", 0, "text")
       assert response.dig("result", "isError")
       assert_match(/Key 'cloudflare' not found/, text)
@@ -347,10 +428,10 @@ class MCPServerTest < Minitest::Test
       require "localvault/mcp/server"
       server = LocalVault::MCP::Server.new(input: StringIO.new, output: StringIO.new)
 
-      response_a = server_call(server, "tools/call", { "name" => "get_secret", "arguments" => { "key" => "SECRET" } })
+      response_a = server_call(server, "tools/call", { "name" => "get_secret", "arguments" => { "key" => "SECRET", "allow_plaintext" => true } })
       assert_equal "a_value", response_a.dig("result", "content", 0, "text")
 
-      response_b = server_call(server, "tools/call", { "name" => "get_secret", "arguments" => { "key" => "SECRET", "vault" => "teamB" } })
+      response_b = server_call(server, "tools/call", { "name" => "get_secret", "arguments" => { "key" => "SECRET", "vault" => "teamB", "allow_plaintext" => true } })
       assert_equal "b_value", response_b.dig("result", "content", 0, "text")
     end
   end
@@ -360,7 +441,7 @@ class MCPServerTest < Minitest::Test
       stub_keychain(->(_) { nil }) do
         response = send_request("tools/call", {
           "name" => "get_secret",
-          "arguments" => { "key" => "X", "vault" => "other_team" }
+          "arguments" => { "key" => "X", "vault" => "other_team", "allow_plaintext" => true }
         })
         assert response.dig("result", "isError")
         assert_match(/other_team/, response.dig("result", "content", 0, "text"))
@@ -401,7 +482,7 @@ class MCPServerTest < Minitest::Test
 
   def test_missing_session_returns_helpful_error
     stub_keychain(->(_) { nil }) do
-      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "X" } })
+      response = send_request("tools/call", { "name" => "get_secret", "arguments" => { "key" => "X", "allow_plaintext" => true } })
       assert response.dig("result", "isError")
       assert_match(/localvault show/, response.dig("result", "content", 0, "text"))
     end

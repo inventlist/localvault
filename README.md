@@ -70,10 +70,13 @@ localvault exec -- rails server
 |---------|-------------|
 | `init [NAME]` | Create a vault (Argon2id key derivation) |
 | `set KEY VALUE` | Store a secret (supports dot-notation: `project.KEY`) |
+| `set --group GROUP KEY VALUE` | Store a secret in a named group |
 | `get KEY` | Retrieve a secret (raw, pipeable) |
 | `show` | Display all secrets in a table (masked by default) |
 | `show --reveal` | Display with values visible |
 | `show --group` | Group by dot-notation prefix (one table per project) |
+| `show --group QUERY` | Show one exact or uniquely matching group |
+| `groups [QUERY]` | List/search group names and key counts without values |
 | `list` | List key names only |
 | `delete KEY` | Remove a secret |
 | `rename OLD NEW` | Rename a secret key |
@@ -214,7 +217,9 @@ localvault remove @alice -v production --rotate
 
 ## MCP Server (AI Agents)
 
-Give AI agents controlled secret access without hardcoding credentials in MCP config. Exact `get_secret` calls can return secret values to the agent; fuzzy reads return candidate names only.
+Give AI agents controlled secret access without hardcoding credentials in MCP
+config. The default workflow keeps values out of model context: discover names,
+build a `localvault exec` command, then run it with process-scoped injection.
 
 ```bash
 # One-command install for Claude Code
@@ -224,15 +229,24 @@ localvault install-mcp claude-code
 # Unlock your vault for the session
 localvault unlock
 
+# Verify setup without starting the blocking stdio server
+localvault mcp --check
+
 # MCP tools available to the agent:
 #   localvault_whoami             — diagnose active vault/session state
-#   get_secret(key, vault?)       — read an exact secret key
 #   list_secrets(vault?, prefix?, query?) — list/search key names
+#   localvault_build_exec(command, ...) — build safe injection (does not execute)
+#   get_secret(key, allow_plaintext: true, vault?) — explicit plaintext reveal
 #   set_secret(key, value, vault?) — store a secret
 #   delete_secret(key, vault?)    — remove a secret
 ```
 
-Command injection stays in the CLI. Use selectors, mappings, and profiles to keep subprocess envs scoped:
+Agents should prefer `localvault_build_exec` for commands, evaluation, API calls,
+and configuration checks. It returns both argv and a shell-safe command without
+opening a vault or reading a value. `get_secret` rejects calls unless
+`allow_plaintext: true` is explicit.
+
+Use selectors, mappings, and profiles to keep subprocess envs scoped:
 
 ```bash
 localvault exec --profile aws -- aws sts get-caller-identity
@@ -249,8 +263,17 @@ One vault, many projects. Dot-notation keeps secrets organized:
 localvault set myapp.DATABASE_URL postgres://localhost/myapp -v work
 localvault set api.DATABASE_URL postgres://localhost/api -v work
 
+# Or use the guided group form
+localvault set --group myapp DATABASE_URL postgres://localhost/myapp -v work
+
+# Search groups without revealing values
+localvault groups app -v work
+
 # View grouped by project
 localvault show --group -v work
+
+# Show one group by exact or unique prefix
+localvault show --group my -v work
 
 # Filter to one project
 localvault show -p myapp -v work

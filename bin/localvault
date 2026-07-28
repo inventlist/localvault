@@ -9,4 +9,5 @@ rescue LoadError
   require "localvault/cli"
 end
 
-LocalVault::CLI.start(ARGV)
+status = LocalVault::CLI.start(ARGV)
+exit(status) if status.is_a?(Integer) && !status.zero?
