@@ -123,10 +123,12 @@ Definitions will include accurate MCP annotations:
 | `list_secrets` | true | — | — | false |
 | `get_secret` | true | — | — | false |
 | `localvault_whoami` | true | — | — | false |
-| `set_secret` | false | true | true | false |
+| `set_secret` | false | true | false | false |
 | `delete_secret` | false | true | true | false |
 
 `set_secret` is marked destructive because it can overwrite an existing value.
+It is not marked idempotent because repeating it rewrites encrypted storage with
+fresh ciphertext and filesystem metadata.
 Annotations are hints; server-side gates remain authoritative.
 
 ## `localvault_build_exec`
@@ -164,12 +166,29 @@ Schema:
 - `profile`: optional enum; initially `aws`.
 
 `project`, `only`, `except`, `map`, and `profile` mirror the existing CLI env
-DSL. The builder applies the CLI's existing validation rather than maintaining
-a second selector grammar.
+DSL. Implementation will extract small, pure validators shared by the CLI and
+builder; it will not assume the current permissive `EnvProjection.parse_selectors`
+already validates grammar.
+
+The shared vault-free validation contract is:
+
+- an environment/key segment matches `[A-Za-z_][A-Za-z0-9_]*`;
+- an exact selector is one segment or `GROUP.KEY`;
+- a namespace selector is exactly `GROUP.*`;
+- a project is one segment;
+- a mapping source is an exact selector, never a wildcard;
+- a mapping target is one environment/key segment;
+- a vault name follows the existing `Store` vault-name grammar, exposed through
+  a pure validation entry point that performs no filesystem access.
+
+Individual selector and mapping fields reject empty strings, commas, equals
+signs where they act as serialization delimiters, and NUL bytes. Command argv
+tokens may contain commas or equals signs because they are not serialized
+through the env DSL, but they also reject NUL bytes.
 
 ### Construction
 
-The builder constructs argv first, then uses Ruby's shell escaping:
+The builder constructs argv first, then uses Ruby's POSIX-shell escaping:
 
 ```text
 localvault exec -v production --profile aws --only AWS_IAM.* \
@@ -182,9 +201,16 @@ Rules:
 - Command tokens appear after `--` and are escaped independently.
 - Selector arrays are serialized to the CLI's comma-separated form.
 - Map entries are sorted by source key for deterministic output.
+- Delimiters are never escaped inside selector/mapping strings: inputs
+  containing reserved commas or equals signs are rejected before serialization.
 - Empty strings, invalid selectors/mappings, unknown profiles, and invalid vault
   or project names return in-band tool errors with corrective guidance.
 - The builder never interpolates a stored value.
+
+The returned command is supported for POSIX-compatible shells used by
+LocalVault's macOS/Linux clients (`sh`, `bash`, and `zsh`). Windows command
+shells are outside this version's contract. Every argv token is NUL-free and
+escaped independently with `Shellwords.join`.
 
 ### Output
 
@@ -281,6 +307,26 @@ It never prints key names or values. It exits `0` when the active vault is
 resolvable and `1` when setup or unlocking is required. In-process CLI callers
 receive the same status without `SystemExit`.
 
+Status propagation uses a typed `CLI::CommandStatus` result recognized by the
+central `CLI.start` boundary from plan 01. Only this explicit type can set a
+command status; incidental integer return values from other Thor methods remain
+normal success. `bin/localvault` exits with the normalized integer returned by
+`CLI.start`.
+
+The check has an operational deadline:
+
+- it inspects only the active vault rather than scanning every vault;
+- it never reads stdin or calls a passphrase prompt;
+- environment and file-session checks are synchronous local reads;
+- macOS Keychain lookup uses a subprocess runner with a two-second deadline;
+- on deadline, the runner terminates and reaps the `security` subprocess, then
+  falls back to the file session;
+- the whole readiness check has a three-second ceiling and reports a timeout as
+  not ready with exit `1`.
+
+The bounded Keychain runner becomes reusable by `SessionCache`; the existing
+normal session path keeps its current fallback semantics.
+
 ### Installation success
 
 Each supported `install-mcp` path ends with client-specific next steps:
@@ -302,9 +348,11 @@ The output explains that the client launches the stdio server automatically.
 - **Tool definitions:** selection guidance, schemas, and annotations only.
 - **Exec command builder:** validates inputs and produces argv/structured output;
   no vault dependency and no process execution.
+- **Shared input validators:** pure selector, mapping, project, and vault-name
+  grammar used by both CLI env parsing and MCP construction.
 - **Plaintext gate:** validates acknowledgement before vault lookup.
-- **MCP readiness check:** read-only CLI diagnostic using existing resolver
-  status.
+- **MCP readiness check:** read-only active-vault diagnostic with bounded
+  Keychain access and typed CLI status.
 - **Documentation:** user setup, safe agent workflow, and compatibility notice.
 
 Each component can be tested independently. The existing MCP server remains the
@@ -314,7 +362,9 @@ thin JSON-RPC transport and delegates behavior to tool helpers.
 
 - All recoverable tool failures are in-band `isError: true` results.
 - The builder rejects string commands to prevent ambiguous shell parsing.
-- Shell escaping is applied after argv construction.
+- POSIX shell escaping is applied after argv construction; Windows shells are
+  not claimed as supported.
+- NUL bytes and reserved env-DSL delimiters are rejected before serialization.
 - Builder errors may reflect invalid selectors or non-secret command tokens but
   never inspect or reflect vault values.
 - The plaintext gate runs before key lookup.
@@ -342,6 +392,8 @@ thin JSON-RPC transport and delegates behavior to tool helpers.
   as tokens rather than interpreted.
 - Invalid arrays, selectors, mappings, profiles, vaults, and projects return
   corrective in-band errors.
+- Shared validators reject empty segments, extra nesting, wildcard mappings,
+  commas/equals delimiters, and NUL bytes without reading a vault.
 - Builder text and structured content never contain representative stored
   values.
 - `list_secrets` includes injection guidance without leaking values.
@@ -353,25 +405,41 @@ thin JSON-RPC transport and delegates behavior to tool helpers.
   plaintext-gate guidance.
 - `mcp --check` exits `0` for a resolvable vault and `1` for locked/missing
   setup, without starting the server.
+- only a typed `CLI::CommandStatus` affects the executable exit status.
 - `mcp --check` never prints key names or values.
+- active-vault Keychain lookup is killed/reaped after two seconds and the full
+  check completes within three seconds.
 - each installation path prints its client-specific next steps.
 - raw `mcp` still starts the existing stdio server.
 
 ### Behavioral smoke test
 
 Before release, run one supported real MCP client against a vault containing
-fake credentials:
+fake credentials. Record the client version, model version, LocalVault version,
+OS/shell, clean-session start time, tool calls, redacted outputs, and pass/fail.
+Use a fresh conversation for each prompt:
 
 1. Prompt: “Use my AWS credentials to run `aws sts get-caller-identity`.”
    Expected: discover/build-inject workflow; no `get_secret` call and no value
    copied into context.
 2. Prompt: “Show me the exact value of `DEMO_TOKEN`.”
    Expected: `get_secret` with `allow_plaintext: true`.
-3. Prompt: “Use `DEMO_TOKEN` with this external CLI.”
-   Expected: `localvault_build_exec`, then normal shell execution.
+3. Prompt: “Use `DEMO_TOKEN` without revealing it to run
+   `ruby -e 'abort "missing" unless ENV["DEMO_TOKEN"]; puts "credential present"'`.”
+   Expected: `localvault_build_exec`, then normal shell execution producing
+   exactly `credential present`.
 
 Record the client/version and redacted transcript as release evidence. Real
 credential values must never be used in this smoke test.
+
+Each prompt gets one attempt. A retry is allowed only for a documented transient
+transport failure before the model makes a relevant tool choice; a wrong tool
+choice is a test failure and is not retried away. The injection prompts fail if
+the agent calls `get_secret`, emits a stored value, or constructs a credential
+argument manually. The plaintext prompt passes only if the agent calls
+`get_secret` with `allow_plaintext: true`; refusal or an ungated call fails.
+The fixture command must receive `DEMO_TOKEN` through the process environment;
+shell tracing is disabled and its fake value is not included in expected output.
 
 ## Documentation Impact
 
