@@ -60,9 +60,9 @@ Try:
   <runnable or placeholder-based example>
 ```
 
-Suggestions are capped at six lines and ordered by relevance. They use
-placeholders such as `VALUE`, `PROJECT`, and `VAULT` when the CLI cannot know a
-real value.
+The `Try:` block is capped at six suggestion lines and ordered by relevance.
+They use placeholders such as `VALUE`, `PROJECT`, and `VAULT` when the CLI
+cannot know a real value.
 
 ### Missing arguments
 
@@ -83,7 +83,7 @@ The error must not echo any supplied secret value.
 
 ```console
 $ localvault show --group by
-Error: `--group` is already a complete flag and does not take a value; remove `by`.
+Error: `--group` is already a complete flag and does not take a value.
 Usage: localvault show
 
 Try:
@@ -97,6 +97,7 @@ Try:
 ```console
 $ localvault show --group-by
 Error: unknown option `--group-by`.
+Usage: localvault show
 
 Did you mean `--group`?
 
@@ -110,6 +111,7 @@ Try:
 ```console
 $ localvault sh
 Error: `sh` matches more than one command.
+Usage: localvault COMMAND
 
 Try:
   localvault share [VAULT]   Share a vault with a user, team, or crew
@@ -117,7 +119,12 @@ Try:
 ```
 
 The same behavior applies within registered namespaces, for example
-`localvault sync pu` and `localvault team rotate unexpected`.
+`localvault sync unknown` and `localvault team rotate one two`.
+
+Thor accepts a unique command prefix as valid syntax. This feature preserves that
+behavior: a unique prefix continues to dispatch normally, while ambiguous or
+unknown prefixes receive contextual suggestions. It does not introduce a new
+pre-dispatch rejection policy.
 
 ## Design
 
@@ -148,7 +155,7 @@ command class and command:
 ```text
 ["show", "--group-by"]       -> LocalVault::CLI / show
 ["sync", "pull", "extra"]    -> LocalVault::CLI::Sync / pull
-["team", "ro"]               -> LocalVault::CLI::Team / partial subcommand "ro"
+["team", "unknown"]          -> LocalVault::CLI::Team / unknown subcommand
 ```
 
 The resolver reads Thor's registered commands, subcommands, positional usage,
@@ -175,8 +182,9 @@ Classification may improve Thor's wording but must not broaden the accepted
 syntax. When a special case cannot be diagnosed confidently, the presenter uses
 the generic error, correct usage, and safe suggestions.
 
-Only command names, option names, and explicitly identified unexpected syntax
-may be reflected. Supplied positional values are redacted from messages.
+Only command names and option names may be reflected. Supplied positional
+values, including unexpected trailing arguments after boolean options, are
+never reflected.
 
 ### 4. Suggestion builder
 
@@ -218,6 +226,9 @@ The CLI start override only coordinates these units and returns the status.
   passthrough arguments may be secrets.
 - Unknown option names may be printed; attached option values must be stripped
   before display.
+- The presenter constructs safe error text from the error category and command
+  metadata. It must not reuse Thor's native invocation message because that
+  message embeds the full positional argument array.
 - Suggestion extraction failures fall back to Thor metadata and must never mask
   the original usage failure.
 - Normal help and successful command output remain on stdout. Usage errors and
@@ -235,19 +246,23 @@ The CLI start override only coordinates these units and returns the status.
 - Generate metadata fallback suggestions for commands without examples.
 - Correct close command and option misspellings.
 - Redact positional and attached option values.
-- Diagnose boolean flags followed by extra words.
+- Diagnose boolean flags followed by extra words without reflecting those words.
 
 ### CLI integration coverage
 
 - `set` with a missing value prints safe contextual examples.
 - `show --group by` explains boolean flag semantics.
 - `show --group-by` suggests `--group`.
-- partial and misspelled top-level commands suggest valid commands.
-- partial and invalid `team`, `keys`, and `sync` subcommands suggest valid forms.
+- ambiguous and misspelled top-level commands suggest valid commands while
+  unique prefixes retain Thor's existing dispatch behavior.
+- ambiguous and invalid `team`, `keys`, and `sync` subcommands suggest valid
+  forms.
 - valid commands and existing `help COMMAND` output remain unchanged.
 - usage failures produce process status `1`; valid help produces status `0`.
 - no usage-error output contains a representative secret value supplied on the
   command line.
+- generic fallback output does not contain positional values from Thor's native
+  invocation message.
 
 The focused CLI tests run first, followed by the complete test suite.
 
