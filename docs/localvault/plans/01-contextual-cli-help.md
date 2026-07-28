@@ -1,7 +1,7 @@
 # Contextual CLI Help
 
-**Status:** Approved design
-**Scope:** LocalVault CLI-wide usage and discovery errors
+**Status:** Draft revision — awaiting user review
+**Scope:** LocalVault CLI-wide usage help and group discovery
 
 ## Problem
 
@@ -18,7 +18,8 @@ The user must already know to run a separate help command and translate its
 contents back to the failed invocation. This is especially awkward for:
 
 - missing positional arguments, such as `localvault set group`;
-- extra words after boolean flags, such as `localvault show --group by`;
+- discovering stored group names before showing or adding secrets;
+- saving into a group without already knowing the dot-notation convention;
 - misspelled flags, such as `localvault show --group-by`;
 - partial or misspelled commands and subcommands;
 - nested namespaces such as `team`, `keys`, and `sync`.
@@ -36,12 +37,15 @@ contents back to the failed invocation. This is especially awkward for:
    output.
 6. Return a nonzero process status for CLI usage errors without forcing
    `SystemExit` on callers that invoke `LocalVault::CLI.start` in-process.
+7. Make stored groups discoverable by partial name and make saving into a group
+   obvious without requiring users to know dot notation in advance.
 
 ## Non-goals
 
 - Rewriting the normal top-level help page.
 - Adding shell completion scripts or an interactive command picker.
-- Changing command names, argument shapes, or existing option semantics.
+- Removing or breaking existing command forms, including `show --group` and
+  `set GROUP.KEY VALUE`.
 - Reformatting domain errors produced after a valid command begins execution,
   such as authentication, network, decryption, or missing-vault failures.
 - Generating every possible option permutation. Suggestions must remain short
@@ -79,18 +83,87 @@ Try:
 
 The error must not echo any supplied secret value.
 
-### Boolean flag followed by an extra word
+### Find stored groups
 
 ```console
-$ localvault show --group by
-Error: `--group` is already a complete flag and does not take a value.
-Usage: localvault show
+$ localvault groups str
+Groups matching `str` in vault `default`:
+
+  Group         Keys   Kind
+  STRIPE        4      namespace
+  STRATUS       2      flat prefix
+```
+
+Group search uses case-insensitive prefix matching, not substring matching. With
+no query, `groups` lists every group. It lists names, key counts, and whether
+each group is a dot-notation namespace or an inferred flat-key prefix; it never
+prints values. A query with no matches prints `No groups match QUERY` on stdout
+and exits `0`, because an empty search result is not a command failure.
+
+`localvault show --group QUERY` uses the same catalog. An exact or unique match
+shows that group's masked table. Multiple matches list candidates and runnable
+`show --group GROUP` forms. No match reports the query and points to
+`localvault groups`.
+
+Resolution order is deterministic:
+
+1. an exact case-sensitive name wins;
+2. otherwise, one case-insensitive exact match wins;
+3. multiple case-insensitive exact matches are ambiguous;
+4. otherwise, case-insensitive prefix matches are considered;
+5. one prefix match wins, multiple are ambiguous, and zero are absent.
+
+An exact or unique match prints the normal table on stdout and exits `0`.
+Ambiguous or absent `show` queries print candidate/help output on stderr and
+exit `1`.
+
+`localvault show --group` with no query preserves its current behavior of
+rendering all groups.
+
+If namespace and flat-prefix keys have the exact same group name, the catalog
+returns one group with kind `mixed` and a combined key count. Namespace keys
+keep their inner labels in the table; flat keys keep their full labels. If
+groups differ only by letter case, an exact-case query wins; a non-exact query
+lists both matches rather than guessing.
+
+### Save into a group
+
+```console
+$ localvault set --group STRIPE API_KEY sk_live_...
+Set API_KEY in group `STRIPE` in vault `default`.
+
+Stored as:
+  STRIPE.API_KEY
+```
+
+This is a discoverable alias for the existing
+`localvault set STRIPE.API_KEY VALUE` form. Incomplete group saves show both
+forms and point to `localvault groups [QUERY]`:
+
+```console
+$ localvault set --group STRIPE API_KEY
+Error: saving in a group needs GROUP, KEY, and VALUE.
+Usage: localvault set --group GROUP KEY VALUE
 
 Try:
-  localvault show --group
-  localvault show --group --reveal
-  localvault show --project PROJECT
+  localvault set --group GROUP KEY VALUE
+  localvault set GROUP.KEY VALUE
+  localvault groups [QUERY]
 ```
+
+The error output does not repeat the supplied group, key, or value.
+
+Saving does not resolve partial group names. An exact case-sensitive group name
+is used as written; otherwise, one case-insensitive exact catalog match is
+canonicalized to its stored spelling. Multiple case-insensitive exact matches
+are rejected with candidates. When no exact match exists, the supplied spelling
+creates a new namespace. Invalid group or key segments print a safe error on
+stderr and exit `1`; the secret value is never reflected.
+
+If a scalar secret already occupies the exact proposed top-level group name,
+the command cannot create that namespace. It prints
+`Cannot create group: that name is already used by a secret key` on stderr and
+exits `1`, without reflecting the group, key, or value.
 
 ### Misspelled option
 
@@ -102,7 +175,8 @@ Usage: localvault show
 Did you mean `--group`?
 
 Try:
-  localvault show --group
+  localvault show --group GROUP
+  localvault groups [QUERY]
   localvault show --project PROJECT
 ```
 
@@ -166,7 +240,59 @@ Option values and `--` passthrough arguments are skipped while resolving
 context. This prevents values that happen to match command names from changing
 the diagnosis.
 
-### 3. Error classifier
+### 3. Group catalog
+
+A shared group catalog derives groups from decrypted vault keys using the same
+rules as the current grouped table:
+
+- a top-level hash is a dot-notation namespace;
+- flat keys containing `_` are grouped by their first underscore-delimited
+  prefix;
+- flat keys without `_` remain ungrouped and are not returned as groups.
+
+The catalog exposes group name, key count, kind, and case-insensitive matching.
+It is used by both `groups [QUERY]` and `show --group [QUERY]`, keeping search
+and display semantics consistent.
+
+The catalog returns an explicit match result: `exact`, `unique`, `ambiguous`, or
+`absent`. Callers format that result for their command rather than reimplementing
+matching rules.
+
+`groups` and group-filtered `show` are valid vault-reading commands, so they use
+the normal vault-opening/session flow. The parse-error presenter does not open a
+vault or attempt to discover dynamic group names.
+
+Thor's `--group` option becomes an optional string with a lazy default sentinel:
+no supplied value means “all groups,” preserving the existing boolean form;
+a supplied value is a group query.
+
+Before Thor dispatch, a narrow compatibility normalizer preserves every legacy
+boolean spelling for the `show` command:
+
+- `--group`, `--group=true`, `--group true`, `--group=TRUE`, and the existing
+  `t`/`T` variants mean “show all groups”;
+- `--group=false`, `--group false`, `--group=FALSE`, the existing `f`/`F`
+  variants, `--no-group`, and `--skip-group` mean “do not group.”
+
+Those boolean words are reserved and cannot be used as a group query through
+`show --group`; `groups QUERY` can still discover them. All other supplied
+values are group queries.
+
+The normalizer runs only when Thor resolves the top-level command exactly or by
+a unique prefix to `show`, and it stops processing at `--`. It never rewrites
+`set --group ...`, another command's arguments, or passthrough arguments.
+
+`set --group GROUP KEY VALUE` validates `GROUP` and `KEY` as individual vault
+key segments, joins them as `GROUP.KEY`, then uses the existing `Vault#set`
+path. The existing dotted form remains unchanged.
+
+Group display/save failures use a structured `Thor::Error` subclass containing
+only the failure kind and safe group metadata, never a secret value. It reaches
+the same central boundary as usage errors, which formats stderr and returns
+status `1`. This avoids incidental Ruby method return values controlling the
+process status.
+
+### 4. Error classifier
 
 The presenter classifies a rescued error and resolved context into:
 
@@ -175,18 +301,23 @@ The presenter classifies a rescued error and resolved context into:
 - unknown or misspelled option;
 - missing positional argument;
 - extra positional argument;
-- boolean option incorrectly followed by a value;
+- ambiguous or absent group selection;
+- invalid or case-ambiguous group save target;
 - generic Thor usage error fallback.
 
 Classification may improve Thor's wording but must not broaden the accepted
 syntax. When a special case cannot be diagnosed confidently, the presenter uses
 the generic error, correct usage, and safe suggestions.
 
-Only command names and option names may be reflected. Supplied positional
-values, including unexpected trailing arguments after boolean options, are
-never reflected.
+For parse and usage failures, only command and option names may be reflected;
+supplied positional and option values are never reflected. Valid group
+discovery commands may display the user's group query and catalog-derived group
+names, because those are the requested discovery result. Structured
+`show --group` failures may display the query and catalog candidates, but never
+secret keys or values. Structured `set --group` failures may display catalog
+candidates, but never reflect the raw supplied group, key, or value.
 
-### 4. Suggestion builder
+### 5. Suggestion builder
 
 Suggestions come from two sources:
 
@@ -206,12 +337,13 @@ suggestions. It does not compute the full power set of options.
 For unknown or ambiguous commands, suggestions instead show matching command
 names with their one-line Thor descriptions.
 
-### 5. Boundaries
+### 6. Boundaries
 
-The implementation will keep three responsibilities independently testable:
+The implementation will keep four responsibilities independently testable:
 
 - **Context resolver:** arguments and Thor metadata in, resolved command context
   out.
+- **Group catalog:** a vault key structure in, searchable group metadata out.
 - **Suggestion builder:** resolved context and error category in, safe ordered
   suggestions out.
 - **Error presenter:** error and original arguments in, formatted stderr output
@@ -222,8 +354,11 @@ The CLI start override only coordinates these units and returns the status.
 ## Error Handling and Safety
 
 - Contextual help itself must never open or decrypt a vault.
-- Positional argument contents are not printed, because `set` values and command
-  passthrough arguments may be secrets.
+- Positional and option-value contents are not printed in parse/usage failures,
+  because `set` values and command passthrough arguments may be secrets.
+- Valid `groups` output and structured group-selection failures may print the
+  group query and catalog group names under the narrower discovery rules above;
+  they never print secret keys or values.
 - Unknown option names may be printed; attached option values must be stripped
   before display.
 - The presenter constructs safe error text from the error category and command
@@ -233,8 +368,12 @@ The CLI start override only coordinates these units and returns the status.
   the original usage failure.
 - Normal help and successful command output remain on stdout. Usage errors and
   their suggestions remain on stderr.
-- Only parsing and invocation errors return the new status `1`; existing
-  post-dispatch domain-error behavior is unchanged by this feature.
+- Parsing/invocation errors, ambiguous or absent `show --group` lookups, and
+  invalid or case-ambiguous `set --group` targets return status `1` from
+  in-process `CLI.start` and from the executable. Empty `groups` searches are
+  successful and return `0`.
+- Existing post-dispatch domain-error behavior outside the new group commands is
+  unchanged by this feature.
 
 ## Testing
 
@@ -246,12 +385,43 @@ The CLI start override only coordinates these units and returns the status.
 - Generate metadata fallback suggestions for commands without examples.
 - Correct close command and option misspellings.
 - Redact positional and attached option values.
-- Diagnose boolean flags followed by extra words without reflecting those words.
+- Search namespace and flat-prefix groups case-insensitively.
+- Preserve all-groups behavior when `--group` has no value.
+- Resolve exact-case, case-insensitive exact, unique-prefix, ambiguous, and
+  absent group matches.
+- Merge same-spelling namespace and flat-prefix groups as `mixed`.
+- Prefer an exact-case group when case-distinct names otherwise collide, and
+  report ambiguous non-exact case collisions.
+- Build `GROUP.KEY` safely for the group-saving alias.
+- Canonicalize only case-insensitive exact group names on save; never resolve a
+  partial group name while writing.
+- Reject group creation when a scalar secret already occupies the top-level
+  name.
+- Normalize legacy boolean spellings only for exact or uniquely prefixed
+  `show`, and stop normalization at `--`.
 
 ### CLI integration coverage
 
 - `set` with a missing value prints safe contextual examples.
-- `show --group by` explains boolean flag semantics.
+- `groups`, `groups str`, and a no-match query list safe group metadata.
+- `show --group`, exact, unique-prefix, ambiguous-prefix, absent, mixed-source,
+  exact-case collision, and non-exact case-collision queries behave consistently
+  with the group catalog.
+- bare `show --group` continues rendering ungrouped keys after named groups.
+- legacy `--group=true`, `--group true`, `t`/`T`, `--group=false`,
+  `--group false`, `f`/`F`, `--no-group`, and `--skip-group` forms preserve
+  their current behavior.
+- legacy normalization works through a unique `show` prefix but never rewrites
+  another command or content after `--`.
+- `set --group STRIPE API_KEY VALUE` stores the same key as
+  `set STRIPE.API_KEY VALUE`.
+- `set --group stripe ...` canonicalizes an existing unique `STRIPE` name,
+  rejects case-ambiguous names, and creates a literal namespace only when no
+  exact case-insensitive group exists.
+- invalid `GROUP` and `KEY` segments fail safely without reflecting the value.
+- a scalar/group-name collision fails safely without replacing the scalar.
+- an incomplete `set --group` invocation explains both group-saving forms
+  without reflecting supplied values.
 - `show --group-by` suggests `--group`.
 - ambiguous and misspelled top-level commands suggest valid commands while
   unique prefixes retain Thor's existing dispatch behavior.
@@ -273,6 +443,9 @@ per-command examples remain the source material for suggestions, so commands
 that add or change syntax should continue updating their long descriptions and
 tests as they do today.
 
+The command reference and top-level help will also document `groups [QUERY]`,
+`show --group [GROUP]`, and `set --group GROUP KEY VALUE`.
+
 ## Acceptance Criteria
 
 The feature is complete when:
@@ -286,4 +459,8 @@ The feature is complete when:
    return status;
 5. successful invocations and existing normal help remain behaviorally
    compatible;
-6. the full test suite passes.
+6. stored groups can be searched and shown by partial name without revealing
+   secret values;
+7. users can save into a group through either the guided `--group` form or the
+   existing dotted-key form;
+8. the full test suite passes.
