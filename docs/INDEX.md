@@ -4,10 +4,10 @@
 
 - [PILLARS.md](PILLARS.md) — project pillar lock
 - `plans/00-delivery-sequence.md` — implementation order; local and Kuickr only
-- `plans/01-contextual-cli-help.md` — approved CLI help and group design
-- `plans/02-mcp-safe-secret-use.md` — approved MCP safety and setup design
-- `plans/03-contextual-cli-help-implementation.md` — executable CLI plan
-- `plans/04-mcp-safe-secret-use-implementation.md` — executable MCP plan
+- `plans/01-contextual-cli-help.md` — CLI help and group design, released in 1.8.0
+- `plans/02-mcp-safe-secret-use.md` — MCP safety and setup design, released in 1.8.0
+- `plans/03-contextual-cli-help-implementation.md` — implemented CLI plan
+- `plans/04-mcp-safe-secret-use-implementation.md` — implemented MCP plan
 
 The shared documentation rules and templates live in `../../74-dev-docs`.
 Project plans are intentionally ignored by Git and published at
