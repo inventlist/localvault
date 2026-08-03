@@ -40,16 +40,16 @@ You'll be prompted for a passphrase (with confirmation). This creates a vault ca
 
 ```bash
 # API keys
-localvault set OPENAI_API_KEY "sk-proj-..."
-localvault set STRIPE_SECRET_KEY "sk_live_..."
+printf '%s' "$OPENAI_API_KEY" | localvault set OPENAI_API_KEY --stdin
+printf '%s' "$STRIPE_SECRET_KEY" | localvault set STRIPE_SECRET_KEY --stdin
 
 # Tokens and credentials
-localvault set GITHUB_TOKEN "ghp_..."
-localvault set AWS_SECRET_ACCESS_KEY "wJalr..."
+printf '%s' "$GITHUB_TOKEN" | localvault set GITHUB_TOKEN --stdin
+printf '%s' "$AWS_SECRET_ACCESS_KEY" | localvault set AWS_SECRET_ACCESS_KEY --stdin
 
 # Database URLs, webhook secrets, anything sensitive
-localvault set DATABASE_URL "postgres://user:pass@host/db"
-localvault set WEBHOOK_SECRET "whsec_..."
+printf '%s' "$DATABASE_URL" | localvault set DATABASE_URL --stdin
+printf '%s' "$WEBHOOK_SECRET" | localvault set WEBHOOK_SECRET --stdin
 
 # Retrieve a single secret
 localvault get OPENAI_API_KEY
@@ -92,8 +92,8 @@ Separate secrets by project, environment, or service. Each vault has its own pas
 localvault init production
 localvault init staging
 
-localvault set API_KEY "sk-prod-xxx" --vault production
-localvault set API_KEY "sk-staging-xxx" --vault staging
+printf '%s' "$PRODUCTION_API_KEY" | localvault set API_KEY --stdin --vault production
+printf '%s' "$STAGING_API_KEY" | localvault set API_KEY --stdin --vault staging
 
 localvault vaults
 # => default (default)

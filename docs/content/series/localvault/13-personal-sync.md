@@ -84,7 +84,7 @@ Sync is manual — push after changes, pull to update:
 
 ```bash
 # Machine A: add a new secret
-localvault set NEW_KEY "value" -v production
+printf '%s' "$NEW_SECRET" | localvault set NEW_KEY --stdin -v production
 localvault sync push production
 
 # Machine B: pull the update

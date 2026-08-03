@@ -17,6 +17,9 @@
     { "id": "10", "file": "10-mcp-config-leaking-secrets.md", "type": "journey" },
     { "id": "11", "file": "11-team-init-and-scoped-sharing.md", "type": "doc" },
     { "id": "12", "file": "12-rotation-revocation-and-push-auth.md", "type": "doc" },
-    { "id": "13", "file": "13-personal-sync.md", "type": "doc" }
+    { "id": "13", "file": "13-personal-sync.md", "type": "doc" },
+    { "id": "14", "file": "14-mcp-first-localvault.md", "type": "journey" },
+    { "id": "15", "file": "15-scoped-env-injection.md", "type": "doc" },
+    { "id": "16", "file": "16-safe-stdin-writes-and-doctor.md", "type": "journey" }
   ]
 }

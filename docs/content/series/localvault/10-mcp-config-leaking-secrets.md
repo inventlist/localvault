@@ -130,9 +130,9 @@ Create a vault and add your secrets:
 
 ```bash
 localvault init
-localvault set GITHUB_TOKEN ghp_a1b2c3d4e5...
-localvault set SLACK_BOT_TOKEN xoxb-1234567890...
-localvault set DATABASE_URL postgresql://admin:s3cret@prod-db:5432/myapp
+printf '%s' "$GITHUB_TOKEN" | localvault set GITHUB_TOKEN --stdin
+printf '%s' "$SLACK_BOT_TOKEN" | localvault set SLACK_BOT_TOKEN --stdin
+printf '%s' "$DATABASE_URL" | localvault set DATABASE_URL --stdin
 ```
 
 Unlock your session (one prompt, then cached):

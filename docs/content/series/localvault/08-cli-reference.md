@@ -125,9 +125,9 @@ These pre-v1.2 commands still work as a fallback when a vault isn't a team vault
 When you have many projects in one vault, prefix keys with `project.key`:
 
 ```bash
-localvault set platepose.DATABASE_URL postgres://...   -v intellectaco
-localvault set inventlist.STRIPE_KEY sk_live_...        -v intellectaco
-printf '%s' "$SECRET" | localvault set platepose.SECRET_KEY_BASE --stdin -v intellectaco
+printf '%s' "$PLATEPOSE_DATABASE_URL" | localvault set platepose.DATABASE_URL --stdin -v intellectaco
+printf '%s' "$INVENTLIST_STRIPE_KEY" | localvault set inventlist.STRIPE_KEY --stdin -v intellectaco
+printf '%s' "$PLATEPOSE_SECRET_KEY_BASE" | localvault set platepose.SECRET_KEY_BASE --stdin -v intellectaco
 
 # Show one project only
 localvault show -p platepose -v intellectaco

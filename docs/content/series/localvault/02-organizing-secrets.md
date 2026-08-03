@@ -15,10 +15,10 @@ LocalVault supports two ways to organize secrets depending on how complex your s
 For a single project or personal use, just store secrets as plain keys:
 
 ```bash
-localvault set DATABASE_URL postgres://localhost/myapp
-localvault set REDIS_URL    redis://localhost
-localvault set STRIPE_KEY   sk_live_abc123
-localvault set STRIPE_SECRET whsec_xyz
+printf '%s' "$DATABASE_URL" | localvault set DATABASE_URL --stdin
+printf '%s' "$REDIS_URL" | localvault set REDIS_URL --stdin
+printf '%s' "$STRIPE_KEY" | localvault set STRIPE_KEY --stdin
+printf '%s' "$STRIPE_SECRET" | localvault set STRIPE_SECRET --stdin
 ```
 
 Run `localvault show --group` and LocalVault automatically groups them by their prefix:
@@ -50,12 +50,12 @@ Vault: default  (4 secrets)
 For a team vault that holds secrets for several projects, use dot-notation:
 
 ```bash
-localvault set platepose.SECRET_KEY_BASE  abc123   -v intellectaco
-localvault set platepose.RAILS_MASTER_KEY 703d11af -v intellectaco
-localvault set platepose.DATABASE_URL     postgres://... -v intellectaco
+printf '%s' "$PLATEPOSE_SECRET_KEY_BASE" | localvault set platepose.SECRET_KEY_BASE --stdin -v intellectaco
+printf '%s' "$PLATEPOSE_RAILS_MASTER_KEY" | localvault set platepose.RAILS_MASTER_KEY --stdin -v intellectaco
+printf '%s' "$PLATEPOSE_DATABASE_URL" | localvault set platepose.DATABASE_URL --stdin -v intellectaco
 
-localvault set inventlist.SECRET_KEY_BASE  xyz789   -v intellectaco
-localvault set inventlist.DATABASE_URL     postgres://... -v intellectaco
+printf '%s' "$INVENTLIST_SECRET_KEY_BASE" | localvault set inventlist.SECRET_KEY_BASE --stdin -v intellectaco
+printf '%s' "$INVENTLIST_DATABASE_URL" | localvault set inventlist.DATABASE_URL --stdin -v intellectaco
 ```
 
 `localvault show -v intellectaco` renders each project as its own group:
@@ -191,8 +191,8 @@ localvault switch default      # switch back
 
 | Goal | Command |
 |------|---------|
-| Simple key | `localvault set KEY value` |
-| Nested key | `localvault set project.KEY value -v vault` |
+| Simple key | `printf '%s' "$SECRET" \| localvault set KEY --stdin` |
+| Nested key | `printf '%s' "$SECRET" \| localvault set project.KEY --stdin -v vault` |
 | Import from file | `localvault import file.env -v vault --project app` |
 | Rename key | `localvault rename OLD NEW` |
 | Copy to vault | `localvault copy KEY --to other-vault` |

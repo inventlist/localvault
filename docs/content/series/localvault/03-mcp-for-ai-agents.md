@@ -36,8 +36,9 @@ The agent never sees your passphrase. It gets access to individual secrets only 
 | Tool | What it does |
 |------|-------------|
 | `localvault_whoami` | Diagnose active vault, session, and unlocked state |
-| `get_secret` | Retrieve an exact secret key |
 | `list_secrets` | List/search secret keys (values hidden) |
+| `localvault_build_exec` | Build a `localvault exec` command for process injection |
+| `get_secret` | Retrieve an exact secret key when plaintext is explicitly allowed |
 | `set_secret` | Store a new secret |
 | `delete_secret` | Delete a secret |
 
@@ -52,9 +53,15 @@ get_secret(key: "DATABASE_URL", vault: "production")
 set_secret(key: "NEW_TOKEN", value: "...", vault: "staging")
 list_secrets(vault: "intellectaco")
 list_secrets(vault: "intellectaco", prefix: "AWS_IAM.")
+localvault_build_exec(command: ["aws", "sts", "get-caller-identity"], profile: "aws")
 ```
 
 If no vault is specified, MCP uses the same active vault as the CLI: explicit vault, then `LOCALVAULT_VAULT`, then `localvault switch` / configured default.
+
+For most agent work, prefer `localvault_build_exec` over `get_secret`. The
+agent can run a command with injected environment variables without copying the
+secret value into model context. `get_secret` requires an exact key and an
+explicit plaintext acknowledgement.
 
 ## Manual config (without install-mcp)
 
