@@ -1,6 +1,8 @@
 require_relative "test_helper"
 require_relative "../lib/localvault/cli"
+require "open3"
 require "rbconfig"
+require "stringio"
 
 class CLITest < Minitest::Test
   include LocalVault::TestHelper
@@ -217,6 +219,159 @@ class CLITest < Minitest::Test
 
       vault = open_test_vault("default")
       assert_equal "postgres://localhost", vault.get("DB_URL")
+    end
+  end
+
+  def test_set_stdin_stores_secret_without_printing_value
+    create_test_vault("default")
+
+    with_session("default") do
+      out, err = with_stdin(StringIO.new("super-secret\n")) do
+        capture_io do
+          status = LocalVault::CLI.start(%w[set API_KEY --stdin])
+          assert_equal 0, status
+        end
+      end
+
+      vault = open_test_vault("default")
+      assert_equal "super-secret\n", vault.get("API_KEY")
+      refute_includes out, "super-secret"
+      refute_includes err, "super-secret"
+    end
+  end
+
+  def test_set_stdin_preserves_empty_and_crlf_values
+    create_test_vault("default")
+
+    with_session("default") do
+      with_stdin(StringIO.new("")) do
+        capture_io { LocalVault::CLI.start(%w[set EMPTY --stdin]) }
+      end
+      with_stdin(StringIO.new("line1\r\nline2\r\n")) do
+        capture_io { LocalVault::CLI.start(%w[set WINDOWS --stdin]) }
+      end
+
+      vault = open_test_vault("default")
+      assert_equal "", vault.get("EMPTY")
+      assert_equal "line1\r\nline2\r\n", vault.get("WINDOWS")
+    end
+  end
+
+  def test_set_stdin_preserves_crlf_from_real_pipe
+    create_test_vault("default")
+
+    with_session("default") do
+      bin_path = File.expand_path("../../bin/localvault", __FILE__)
+      env = {
+        "LOCALVAULT_HOME" => @test_home,
+        "LOCALVAULT_SESSION" => ENV["LOCALVAULT_SESSION"]
+      }
+
+      _out, err, status = Open3.capture3(env, RbConfig.ruby, bin_path, "set", "PIPE_CRLF", "--stdin",
+        stdin_data: "line1\r\nline2\r\n")
+
+      assert status.success?, err
+      vault = open_test_vault("default")
+      assert_equal "line1\r\nline2\r\n", vault.get("PIPE_CRLF")
+    end
+  end
+
+  def test_set_stdin_works_with_group_and_vault_options
+    create_test_vault("staging")
+
+    with_session("staging") do
+      with_stdin(StringIO.new("group-secret")) do
+        capture_io { LocalVault::CLI.start(%w[set --group STRIPE API_KEY --stdin --vault staging]) }
+      end
+
+      vault = open_test_vault("staging")
+      assert_equal "group-secret", vault.get("STRIPE.API_KEY")
+    end
+  end
+
+  def test_set_stdin_rejects_multiple_value_sources_without_storing_or_reflecting_value
+    vault = create_test_vault("default")
+
+    with_session("default") do
+      _out, err = with_stdin(StringIO.new("stdin-secret")) do
+        capture_io do
+          status = LocalVault::CLI.start(%w[set TOKEN argv-secret --stdin])
+          assert_equal 1, status
+        end
+      end
+
+      assert_nil vault.get("TOKEN")
+      assert_includes err, "Use either a positional VALUE or --stdin"
+      refute_includes err, "argv-secret"
+      refute_includes err, "stdin-secret"
+    end
+  end
+
+  def test_set_stdin_rejects_interactive_tty_without_reading
+    vault = create_test_vault("default")
+    tty_input = Object.new
+    def tty_input.tty?
+      true
+    end
+    def tty_input.read
+      raise "stdin should not be read"
+    end
+
+    with_session("default") do
+      _out, err = with_stdin(tty_input) do
+        capture_io do
+          status = LocalVault::CLI.start(%w[set TOKEN --stdin])
+          assert_equal 1, status
+        end
+      end
+
+      assert_nil vault.get("TOKEN")
+      assert_includes err, "Refusing to read secret from interactive stdin"
+      assert_includes err, "printf '%s' \"$SECRET\" | localvault set KEY --stdin"
+    end
+  end
+
+  def test_set_stdin_rejects_invalid_utf8
+    vault = create_test_vault("default")
+
+    with_session("default") do
+      _out, err = with_stdin(StringIO.new("\xFF".b)) do
+        capture_io do
+          status = LocalVault::CLI.start(%w[set TOKEN --stdin])
+          assert_equal 1, status
+        end
+      end
+
+      assert_nil vault.get("TOKEN")
+      assert_includes err, "valid UTF-8"
+    end
+  end
+
+  def test_set_literal_dash_and_stdin_token_remain_positional_values
+    create_test_vault("default")
+
+    with_session("default") do
+      capture_io { LocalVault::CLI.start(%w[set DASH -]) }
+      capture_io { LocalVault::CLI.start(%w[set FLAG -- --stdin]) }
+
+      vault = open_test_vault("default")
+      assert_equal "-", vault.get("DASH")
+      assert_equal "--stdin", vault.get("FLAG")
+    end
+  end
+
+  def test_set_missing_value_shows_safe_stdin_usage
+    create_test_vault("default")
+
+    with_session("default") do
+      _out, err = capture_io do
+        status = LocalVault::CLI.start(%w[set TOKEN])
+        assert_equal 1, status
+      end
+
+      assert_includes err, "Usage: localvault set KEY [VALUE]"
+      assert_includes err, "printf '%s' \"$SECRET\" | localvault set KEY --stdin"
+      refute_includes err, "TOKEN"
     end
   end
 
@@ -1122,6 +1277,38 @@ class CLITest < Minitest::Test
     assert_match(/Unknown client/, err)
   end
 
+  def test_doctor_warns_when_asdf_shim_shadows_homebrew_localvault
+    paths = [
+      "/Users/example/.asdf/shims/localvault",
+      "/opt/homebrew/bin/localvault"
+    ]
+
+    stub_localvault_paths(paths) do
+      out, = capture_io do
+        status = LocalVault::CLI.start(%w[doctor])
+        assert_equal 1, status
+      end
+
+      assert_includes out, "PATH selects an asdf shim before Homebrew localvault"
+      assert_includes out, "/Users/example/.asdf/shims/localvault"
+      assert_includes out, "/opt/homebrew/bin/localvault"
+      assert_includes out, "asdf reshim"
+      assert_includes out, "which -a localvault"
+    end
+  end
+
+  def test_doctor_reports_ok_for_single_localvault_on_path
+    stub_localvault_paths(["/opt/homebrew/bin/localvault"]) do
+      out, = capture_io do
+        status = LocalVault::CLI.start(%w[doctor])
+        assert_equal 0, status
+      end
+
+      assert_includes out, "PATH: ok"
+      refute_includes out, "Warning:"
+    end
+  end
+
   private
 
   def create_test_vault(name, passphrase = test_passphrase)
@@ -1242,5 +1429,23 @@ class CLITest < Minitest::Test
   ensure
     cli.send(:define_method, :find_binary, orig_find)
     cli.send(:define_method, :windsurf_settings_path, orig_path)
+  end
+
+  def with_stdin(input)
+    original_stdin = $stdin
+    $stdin = input
+    yield
+  ensure
+    $stdin = original_stdin
+  end
+
+  def stub_localvault_paths(paths)
+    cli = LocalVault::CLI
+    original = cli.instance_method(:localvault_paths)
+    cli.no_commands { cli.send(:define_method, :localvault_paths) { paths } }
+
+    yield
+  ensure
+    cli.no_commands { cli.send(:define_method, :localvault_paths, original) }
   end
 end

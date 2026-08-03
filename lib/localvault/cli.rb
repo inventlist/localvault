@@ -5,6 +5,7 @@ require "lipgloss"
 require_relative "env_projection"
 require_relative "key_lookup"
 require_relative "session_cache"
+require_relative "stdin_secret_input"
 require_relative "vault_resolver"
 require_relative "group_catalog"
 
@@ -43,6 +44,18 @@ module LocalVault
         @query = query
         @candidates = candidates
         super("group selection failed")
+      end
+
+      def exit_status
+        1
+      end
+    end
+    class SetValueSourceError < Thor::Error
+      attr_reader :kind
+
+      def initialize(kind, message)
+        @kind = kind
+        super(message)
       end
 
       def exit_status
@@ -105,7 +118,9 @@ module LocalVault
       shell.say "  localvault demo               Create a demo vault to explore commands"
       shell.say ""
       shell.say "SECRETS"
-      shell.say "  localvault set KEY VALUE      Store a secret"
+      shell.say "  printf '%s' \"$SECRET\" | localvault set KEY --stdin"
+      shell.say "                              Store a secret without argv/history exposure"
+      shell.say "  localvault set KEY VALUE      Store a secret (compatibility path)"
       shell.say "  localvault set --group G K V  Store a secret inside group G"
       shell.say "  localvault get KEY            Retrieve a secret"
       shell.say "  localvault show               Display all secrets (masked by default)"
@@ -169,6 +184,7 @@ module LocalVault
       shell.say "  localvault login --status     Show current login status"
       shell.say "  localvault logout             Log out"
       shell.say "  localvault version            Print version"
+      shell.say "  localvault doctor             Check install and PATH readiness"
       shell.say "  localvault help [COMMAND]     Full help for any command"
       shell.say ""
     end
@@ -197,9 +213,13 @@ module LocalVault
       abort_with e.message
     end
 
-    desc "set KEY VALUE", "Store a secret (supports dot-notation for nested keys)"
+    desc "set KEY [VALUE]", "Store a secret (supports dot-notation for nested keys)"
     long_desc <<~DESC
       Store a secret in the current vault.
+
+      SAFE INPUT (preferred):
+\x05    printf '%s' "$SECRET" | localvault set KEY --stdin
+\x05    printf '%s' "$SECRET" | localvault set --group GROUP KEY --stdin
 
       FLAT KEY (simple):
 \x05    localvault set DATABASE_URL postgres://localhost/myapp
@@ -215,33 +235,42 @@ module LocalVault
 \x05    localvault set GROUP.KEY VALUE
 \x05    localvault groups [QUERY]
 
+      Positional values may be visible in process lists and shell history.
       The dot separates project from key name. One vault can hold many projects.
       Use `localvault show -p platepose -v vault` to view a single project.
       Use `localvault import` to bulk-load from a .env, .json, or .yml file.
     DESC
     method_option :group, type: :string, desc: "Store KEY and VALUE inside this named group"
-    def set(key, value)
+    method_option :stdin, type: :boolean, default: false, desc: "Read VALUE from stdin instead of argv"
+    def set(key, value = nil)
+      validate_secret_value_source!(value)
       vault = open_vault!
       if options[:group]
         group = canonical_group_name(vault, options[:group])
         validate_group_segment!(group)
         validate_group_segment!(key)
         raise GroupSaveError, :collision if vault.all.key?(group) && !vault.all[group].is_a?(Hash)
+        value = read_secret_value(value)
         vault.set("#{group}.#{key}", value)
         $stdout.puts "Set #{key} in group `#{group}` in vault `#{vault.name}`."
         $stdout.puts
         $stdout.puts "Stored as:"
         $stdout.puts "  #{group}.#{key}"
       else
+        value = read_secret_value(value)
         vault.set(key, value)
         $stdout.puts "Set #{key} in vault '#{vault.name}'"
       end
+    rescue StdinSecretInput::InteractiveInput, StdinSecretInput::InvalidEncoding => e
+      raise SetValueSourceError.new(:stdin, e.message)
     rescue Vault::InvalidKeyName => e
       raise GroupSaveError, :invalid if options[:group]
       abort_with e.message
+      CommandStatus.error
     rescue RuntimeError => e
       raise GroupSaveError, :collision if options[:group]
       abort_with e.message
+      CommandStatus.error
     end
 
     desc "get KEY", "Retrieve a secret value by key"
@@ -1463,6 +1492,46 @@ module LocalVault
       $stdout.puts "localvault #{VERSION}"
     end
 
+    desc "doctor", "Check install and PATH readiness"
+    long_desc <<~DESC
+      Check whether the localvault executable selected by PATH matches the
+      install you expect.
+
+      This catches common Homebrew/asdf shadowing issues after upgrades:
+\x05    localvault doctor
+\x05    which -a localvault
+    DESC
+    def doctor
+      paths = localvault_paths
+      warnings = localvault_path_warnings(paths)
+
+      $stdout.puts "LocalVault doctor"
+      $stdout.puts "Version: localvault #{VERSION}"
+      $stdout.puts "Home: #{Config.root_path}"
+
+      if paths.empty?
+        $stdout.puts "Executable selected by PATH: not found"
+      else
+        $stdout.puts "Executable selected by PATH: #{paths.first}"
+        $stdout.puts "All localvault executables on PATH:"
+        paths.each_with_index { |path, index| $stdout.puts "  #{index + 1}. #{path}" }
+      end
+
+      if warnings.empty?
+        $stdout.puts "PATH: ok"
+        CommandStatus.ok
+      else
+        $stdout.puts
+        warnings.each { |warning| $stdout.puts "Warning: #{warning}" }
+        $stdout.puts
+        $stdout.puts "Suggested checks:"
+        $stdout.puts "  asdf reshim ruby"
+        $stdout.puts "  hash -r"
+        $stdout.puts "  which -a localvault"
+        CommandStatus.error
+      end
+    end
+
     def self.exit_on_failure?
       false
     end
@@ -1488,6 +1557,22 @@ module LocalVault
     end
 
     private
+
+    def validate_secret_value_source!(value)
+      if options[:stdin] && !value.nil?
+        raise SetValueSourceError.new(:multiple, "Use either a positional VALUE or --stdin, not both.")
+      end
+
+      return if options[:stdin] || !value.nil?
+
+      raise SetValueSourceError.new(:missing, "Provide a VALUE or read one with --stdin.")
+    end
+
+    def read_secret_value(value)
+      return value unless options[:stdin]
+
+      StdinSecretInput.read($stdin)
+    end
 
     def canonical_group_name(vault, supplied)
       groups = GroupCatalog.new(vault.all).groups
@@ -1903,12 +1988,45 @@ module LocalVault
 
     no_commands do
       def find_binary(name)
-        path = `which #{name} 2>/dev/null`.strip
-        path.empty? ? nil : path
+        executable_paths_for(name).first
       end
 
       def system_command_exists?(cmd)
         !find_binary(cmd).nil?
+      end
+
+      def localvault_paths
+        executable_paths_for("localvault")
+      end
+
+      def executable_paths_for(name)
+        ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).filter_map do |directory|
+          next if directory.empty?
+
+          path = File.join(directory, name)
+          path if File.executable?(path) && !File.directory?(path)
+        end.uniq
+      end
+
+      def localvault_path_warnings(paths)
+        warnings = []
+        if paths.empty?
+          warnings << "localvault is not on PATH. Brew upgrades may be installed but unreachable."
+          return warnings
+        end
+
+        if paths.first.include?("/.asdf/shims/") && paths.any? { |path| homebrew_localvault_path?(path) }
+          warnings << "PATH selects an asdf shim before Homebrew localvault. " \
+            "A stale shim can hide the upgraded brew executable."
+        elsif paths.length > 1
+          warnings << "Multiple localvault executables are on PATH. Confirm the first entry is the one you intend."
+        end
+
+        warnings
+      end
+
+      def homebrew_localvault_path?(path)
+        path.start_with?("/opt/homebrew/bin/", "/usr/local/bin/")
       end
 
       def cursor_settings_path

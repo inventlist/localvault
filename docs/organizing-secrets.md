@@ -201,9 +201,9 @@ localvault switch default      # switch back
 
 | Goal | Command |
 |------|---------|
-| Simple key | `localvault set KEY value` |
-| Nested key | `localvault set project.KEY value -v vault` |
-| Save into group | `localvault set --group project KEY value -v vault` |
+| Simple key | `printf '%s' "$SECRET" \| localvault set KEY --stdin` |
+| Nested key | `printf '%s' "$SECRET" \| localvault set project.KEY --stdin -v vault` |
+| Save into group | `printf '%s' "$SECRET" \| localvault set --group project KEY --stdin -v vault` |
 | Search groups safely | `localvault groups [QUERY] -v vault` |
 | Import from file | `localvault import file.env -v vault --project app` |
 | Rename key | `localvault rename OLD NEW` |

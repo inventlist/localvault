@@ -60,8 +60,12 @@ module LocalVault
           when :ambiguous then "Error: group name is ambiguous. Existing groups: #{@error.candidates.join(", ")}."
           else "Error: group and key names may contain letters, digits, and underscores only."
           end
+        elsif @error.is_a?(CLI::SetValueSourceError) && @error.kind == :multiple
+          "Error: #{@error.message}"
         elsif group_save_attempt?
           "Error: saving in a group needs GROUP, KEY, and VALUE."
+        elsif @error.is_a?(CLI::SetValueSourceError)
+          "Error: #{@error.message}"
         elsif unknown_option
           "Error: unknown option `#{unknown_option}`."
         elsif context.command.nil?
@@ -97,7 +101,7 @@ module LocalVault
         end
 
         return group_save_suggestions if group_save_attempt?
-        return ["localvault set KEY VALUE", *group_save_suggestions] if context.command&.name == "set"
+        return set_suggestions if context.command&.name == "set"
         return show_group_suggestions if context.command&.name == "show" || unknown_option == "--group-by"
         return ["localvault add HANDLE", "localvault team add HANDLE"] if context.namespace == ["team"] && context.command&.name == "add"
 
@@ -114,6 +118,14 @@ module LocalVault
           "localvault set --group GROUP KEY VALUE",
           "localvault set GROUP.KEY VALUE",
           "localvault groups [QUERY]"
+        ]
+      end
+
+      def set_suggestions
+        [
+          %(printf '%s' "$SECRET" | localvault set KEY --stdin),
+          "localvault set KEY VALUE",
+          *group_save_suggestions
         ]
       end
 

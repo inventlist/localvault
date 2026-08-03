@@ -24,7 +24,8 @@ class ContextualHelpTest < Minitest::Test
     _out, err, status = run_cli("set", "group")
 
     assert_equal 1, status.exitstatus
-    assert_includes err, "localvault set KEY VALUE"
+    assert_includes err, "localvault set KEY [VALUE]"
+    assert_includes err, "printf '%s' \"$SECRET\" | localvault set KEY --stdin"
     assert_includes err, "localvault set --group GROUP KEY VALUE"
     assert_includes err, "localvault set GROUP.KEY VALUE"
     refute_includes err, '"group"'

@@ -12,7 +12,9 @@ type: doc
 |---------|-------------|
 | `localvault init [NAME]` | Create a new vault |
 | `localvault demo` | Create demo vaults with fake data for learning (passphrase: `demo`) |
-| `localvault set KEY VALUE` | Store a secret |
+| `localvault set KEY --stdin` | Store a secret from stdin without argv/history exposure |
+| `localvault set KEY [VALUE]` | Store a secret; positional value is the compatibility path |
+| `localvault set --group GROUP KEY --stdin` | Store a grouped secret from stdin |
 | `localvault get KEY` | Retrieve a secret value |
 | `localvault list` | List all secret keys |
 | `localvault delete KEY` | Remove a secret or project group |
@@ -37,6 +39,7 @@ type: doc
 | `localvault lock [NAME]` | Clear cached session (or all sessions) |
 | `localvault rekey [NAME]` | Change vault passphrase |
 | `localvault reset [NAME]` | Wipe and reinitialize a vault |
+| `localvault doctor` | Check install and PATH readiness, including brew/asdf shadowing |
 
 ## Login
 
@@ -124,6 +127,7 @@ When you have many projects in one vault, prefix keys with `project.key`:
 ```bash
 localvault set platepose.DATABASE_URL postgres://...   -v intellectaco
 localvault set inventlist.STRIPE_KEY sk_live_...        -v intellectaco
+printf '%s' "$SECRET" | localvault set platepose.SECRET_KEY_BASE --stdin -v intellectaco
 
 # Show one project only
 localvault show -p platepose -v intellectaco
@@ -150,6 +154,8 @@ localvault env --map AWS_IAM.access_key_id=AWS_ACCESS_KEY_ID
 
 Selectors are exact keys (`OPENAI_API_KEY`) or one-level namespaces (`AWS_IAM.*`). The `aws` profile maps `AWS_IAM.access_key_id`, `AWS_IAM.secret_access_key`, and `AWS_IAM.session_token` to the canonical AWS environment names.
 
+Prefer `printf '%s' "$SECRET" | localvault set KEY --stdin` for new writes. Positional values may be visible in process lists and shell history.
+
 ## Dot-notation for vault name
 
 Named vault as a positional argument (sync commands) vs global flag (secrets commands):
@@ -157,7 +163,7 @@ Named vault as a positional argument (sync commands) vs global flag (secrets com
 ```bash
 # Secrets commands use --vault / -v flag
 localvault show -v production
-localvault set KEY VAL -v staging
+printf '%s' "$SECRET" | localvault set KEY --stdin -v staging
 
 # Sync commands use a positional argument
 localvault sync push production

@@ -41,10 +41,10 @@ sudo dnf install libsodium-devel
 # Create a vault (prompts for passphrase)
 localvault init
 
-# Store secrets
-localvault set OPENAI_API_KEY "sk-proj-..."
-localvault set STRIPE_SECRET_KEY "sk_live_..."
-localvault set DATABASE_URL "postgres://localhost/myapp"
+# Store secrets without putting values in shell history / process args
+printf '%s' "$OPENAI_API_KEY" | localvault set OPENAI_API_KEY --stdin
+printf '%s' "$STRIPE_SECRET_KEY" | localvault set STRIPE_SECRET_KEY --stdin
+printf '%s' "$DATABASE_URL" | localvault set DATABASE_URL --stdin
 
 # Retrieve a secret (raw, pipeable)
 localvault get OPENAI_API_KEY
@@ -69,8 +69,9 @@ localvault exec -- rails server
 | Command | Description |
 |---------|-------------|
 | `init [NAME]` | Create a vault (Argon2id key derivation) |
-| `set KEY VALUE` | Store a secret (supports dot-notation: `project.KEY`) |
-| `set --group GROUP KEY VALUE` | Store a secret in a named group |
+| `set KEY --stdin` | Store a secret from stdin without argv/history exposure |
+| `set KEY [VALUE]` | Store a secret (positional value kept for compatibility) |
+| `set --group GROUP KEY --stdin` | Store a secret in a named group from stdin |
 | `get KEY` | Retrieve a secret (raw, pipeable) |
 | `show` | Display all secrets in a table (masked by default) |
 | `show --reveal` | Display with values visible |
@@ -143,6 +144,7 @@ backward compatibility but the top-level forms are preferred.
 |---------|-------------|
 | `install-mcp [CLIENT]` | Configure MCP server in claude-code, cursor, or windsurf |
 | `mcp` | Start MCP server (stdio transport) |
+| `doctor` | Check install and PATH readiness, including brew/asdf shadowing |
 
 All commands accept `--vault NAME` (or `-v NAME`) to target a specific vault. Default vault is `default`.
 
@@ -231,6 +233,9 @@ localvault unlock
 
 # Verify setup without starting the blocking stdio server
 localvault mcp --check
+
+# Diagnose brew/asdf PATH shadowing after upgrades
+localvault doctor
 
 # MCP tools available to the agent:
 #   localvault_whoami             — diagnose active vault/session state
