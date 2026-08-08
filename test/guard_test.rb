@@ -94,7 +94,10 @@ class GuardTest < Minitest::Test
     %w[PreToolUse PostToolUse].each do |event|
       entry = settings["hooks"][event].first
       assert_equal "Bash", entry["matcher"]
-      assert_equal "localvault guard hook", entry["hooks"].first["command"]
+      command = entry["hooks"].first["command"]
+      assert_includes command, "localvault guard hook"
+      assert_includes command, "exit 0", "installed command must fail open on old/missing binaries"
+      assert_includes command, "-eq 2", "installed command must pass a genuine deny through"
     end
 
     refute LocalVault::Guard.merge_hooks!(settings), "second install should be a no-op"
@@ -112,7 +115,23 @@ class GuardTest < Minitest::Test
     assert LocalVault::Guard.merge_hooks!(settings)
     commands = settings["hooks"]["PreToolUse"].flat_map { |e| e["hooks"].map { |h| h["command"] } }
     assert_includes commands, "other-tool check"
-    assert_includes commands, "localvault guard hook"
+    assert(commands.any? { |c| c.include?("localvault guard hook") })
+  end
+
+  def test_merge_hooks_recognizes_wrapped_and_bare_commands_as_installed
+    settings = {
+      "hooks" => {
+        "PreToolUse" => [
+          { "matcher" => "Bash", "hooks" => [{ "type" => "command", "command" => "localvault guard hook" }] },
+          { "matcher" => "Bash", "hooks" => [{ "type" => "command", "command" => LocalVault::Guard::HOOK_COMMAND }] }
+        ],
+        "PostToolUse" => [
+          { "matcher" => "Bash", "hooks" => [{ "type" => "command", "command" => LocalVault::Guard::HOOK_COMMAND }] }
+        ]
+      }
+    }
+    refute LocalVault::Guard.merge_hooks!(settings), "existing entries (wrapped or bare) must not be duplicated"
+    assert LocalVault::Guard.installed?(settings)
   end
 
   def test_installed_is_false_when_only_one_event_is_wired

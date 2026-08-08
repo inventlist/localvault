@@ -15,7 +15,12 @@ module LocalVault
   # check gets uninstalled.
   module Guard
     MIN_VALUE_LENGTH = 8
-    HOOK_COMMAND = "localvault guard hook".freeze
+    HOOK_ENTRYPOINT = "localvault guard hook".freeze
+    # The installed command must fail open on machines where the binary is
+    # old, missing, or broken — otherwise every Bash call errors for users
+    # whose settings outlive their localvault install. Only a genuine deny
+    # (exit 2) is allowed through; every other exit becomes a silent allow.
+    HOOK_COMMAND = %(sh -c 'out=$(#{HOOK_ENTRYPOINT} 2>&1); s=$?; if [ $s -eq 2 ]; then echo "$out" >&2; exit 2; fi; exit 0').freeze
     HOOK_EVENTS = %w[PreToolUse PostToolUse].freeze
     ALLOW = { exit: 0, message: nil }.freeze
 
@@ -125,7 +130,7 @@ module LocalVault
       hooks = settings["hooks"] ||= {}
       HOOK_EVENTS.each do |event|
         entries = hooks[event] ||= []
-        next if entries.any? { |e| (e["hooks"] || []).any? { |h| h["command"] == HOOK_COMMAND } }
+        next if entries.any? { |e| (e["hooks"] || []).any? { |h| h["command"].to_s.include?(HOOK_ENTRYPOINT) } }
 
         entries << { "matcher" => "Bash", "hooks" => [{ "type" => "command", "command" => HOOK_COMMAND }] }
         changed = true
@@ -136,7 +141,7 @@ module LocalVault
     def self.installed?(settings)
       hooks = settings["hooks"] || {}
       HOOK_EVENTS.all? do |event|
-        (hooks[event] || []).any? { |e| (e["hooks"] || []).any? { |h| h["command"] == HOOK_COMMAND } }
+        (hooks[event] || []).any? { |e| (e["hooks"] || []).any? { |h| h["command"].to_s.include?(HOOK_ENTRYPOINT) } }
       end
     end
   end

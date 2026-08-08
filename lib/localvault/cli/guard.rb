@@ -38,6 +38,7 @@ module LocalVault
         else
           $stdout.puts "LocalVault guard hooks already installed in #{path}"
         end
+        warn_if_path_binary_lacks_guard
       rescue JSON::ParserError
         $stderr.puts "Error: #{path} is not valid JSON; fix it before installing."
       end
@@ -59,6 +60,20 @@ module LocalVault
       end
 
       no_commands do
+        # The installed hook wraps the entrypoint to fail open, so an old or
+        # missing PATH binary never breaks the user's sessions — but it also
+        # silently guards nothing, which deserves a loud note at install time.
+        def warn_if_path_binary_lacks_guard
+          help_output = `localvault help 2>/dev/null`
+          return if help_output.include?("guard")
+
+          $stderr.puts "Note: the `localvault` on your PATH does not support `guard hook` " \
+                       "(old version or different install). The hook fails open and guards " \
+                       "nothing until you upgrade: brew upgrade localvault"
+        rescue StandardError
+          nil
+        end
+
         def settings_path(project)
           if project
             File.join(Dir.pwd, ".claude", "settings.json")
