@@ -4,6 +4,7 @@ require "base64"
 require "lipgloss"
 require_relative "env_projection"
 require_relative "key_lookup"
+require_relative "plaintext_output"
 require_relative "session_cache"
 require_relative "stdin_secret_input"
 require_relative "vault_resolver"
@@ -292,9 +293,9 @@ module LocalVault
       lookup = KeyLookup.lookup(vault, key)
 
       if lookup.exact?
-        $stdout.puts lookup.value
+        print_plaintext(key, lookup.value)
       elsif lookup.single_match?
-        $stdout.puts vault.get(lookup.matches.first)
+        print_plaintext(lookup.matches.first, vault.get(lookup.matches.first))
       elsif lookup.multiple_matches?
         $stderr.puts "Error: Multiple keys match '#{key}'. Be more specific:"
         lookup.matches.each { |k| $stderr.puts "  #{k}" }
@@ -403,6 +404,15 @@ module LocalVault
     method_option :profile, type: :string, desc: "Apply a built-in env mapping profile (aws)"
     def env
       vault = open_vault!
+      unless PlaintextOutput.permitted?(purpose: "Export plaintext values")
+        abort_with <<~MSG.strip
+          refusing to print plaintext env exports: stdout is a captured stream, not an interactive terminal.
+          Use process-scoped injection instead:
+            localvault exec [--only KEYS|--map KEY=ENV_NAME|--profile aws] -- your-command
+          A human at a terminal is asked to confirm; agents and CI must use injection.
+        MSG
+        return
+      end
       skip_warn = ->(k) { $stderr.puts "Warning: skipping unsafe key '#{k}'" }
       $stdout.puts vault.export_env(**env_projection_options(on_skip: skip_warn))
     rescue EnvProjection::InvalidMapping, EnvProjection::UnknownProfile => e
@@ -520,6 +530,7 @@ module LocalVault
     def show
       vault = open_vault!
       secrets = vault.all
+      reveal = options[:reveal] && reveal_permitted?
 
       named_group_query = options[:group] && ![GROUP_ALL_SENTINEL, GROUP_OFF_SENTINEL].include?(options[:group])
       if secrets.empty? && !named_group_query
@@ -533,21 +544,21 @@ module LocalVault
           abort_with "No project '#{options[:project]}' in vault '#{vault.name}'"
           return
         end
-        render_table(group.sort.to_h, "#{vault.name}/#{options[:project]}", reveal: options[:reveal])
+        render_table(group.sort.to_h, "#{vault.name}/#{options[:project]}", reveal: reveal)
       elsif options[:group] && ![GROUP_ALL_SENTINEL, GROUP_OFF_SENTINEL].include?(options[:group])
         match = GroupCatalog.new(secrets).resolve(options[:group])
         if match.group
           entries = match.group.entries.to_h { |entry| [entry.label, entry.value] }
-          render_table(entries, "#{vault.name}/#{match.group.name}", reveal: options[:reveal])
+          render_table(entries, "#{vault.name}/#{match.group.name}", reveal: reveal)
         elsif match.kind == :ambiguous
           raise GroupSelectionError.new(:ambiguous, query: options[:group], candidates: match.groups.map(&:name))
         else
           raise GroupSelectionError.new(:absent, query: options[:group])
         end
       elsif options[:group] != GROUP_OFF_SENTINEL && (options[:group] || secrets.values.any? { |v| v.is_a?(Hash) })
-        render_grouped_table(secrets, vault.name, reveal: options[:reveal])
+        render_grouped_table(secrets, vault.name, reveal: reveal)
       else
-        render_table(secrets.sort.to_h, vault.name, reveal: options[:reveal])
+        render_table(secrets.sort.to_h, vault.name, reveal: reveal)
       end
     end
 
@@ -754,7 +765,9 @@ module LocalVault
     require_relative "cli/keys"
     require_relative "cli/team"
     require_relative "cli/sync"
+    require_relative "cli/guard"
 
+    register(Guard, "guard", "guard SUBCOMMAND", "Block plaintext secrets in agent tool traffic (Claude Code hooks)")
     register(Keys, "keys", "keys SUBCOMMAND", "Manage your X25519 keypair for vault sharing")
     register(Team, "team", "team SUBCOMMAND", "Manage vault team access")
     register(Sync, "sync", "sync SUBCOMMAND", "Sync vaults to InventList cloud")
@@ -1913,6 +1926,29 @@ module LocalVault
 
     def abort_with(message)
       $stderr.puts "Error: #{message}"
+    end
+
+    # --- plaintext gating (see docs/plans/07-agent-plaintext-containment.md) ---
+
+    def print_plaintext(key, value)
+      unless PlaintextOutput.permitted?(purpose: "Print plaintext value of '#{key}'")
+        env_name = key.split(".").last.upcase
+        abort_with <<~MSG.strip
+          refusing to print plaintext for '#{key}': stdout is a captured stream, not an interactive terminal.
+          Use process-scoped injection instead:
+            localvault exec --map #{key}=#{env_name} -- your-command
+          A human at a terminal is asked to confirm; agents and CI must use injection.
+        MSG
+        return
+      end
+      $stdout.puts value
+    end
+
+    def reveal_permitted?
+      return true if PlaintextOutput.permitted?(purpose: "Reveal plaintext values")
+
+      $stderr.puts "Masking values: stdout is a captured stream. Use `localvault exec` for injection."
+      false
     end
 
     # --- install-mcp helpers ---

@@ -3,6 +3,10 @@ require "tmpdir"
 require "fileutils"
 require_relative "../lib/localvault"
 
+# Tests capture stdout (never a TTY); bypass the plaintext gate globally.
+# Gate-specific tests flip this off and restore it.
+LocalVault::PlaintextOutput.assume_tty = true
+
 module LocalVault
   module TestHelper
     def setup_test_home
