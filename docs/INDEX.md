@@ -12,15 +12,18 @@
 - `plans/07-agent-plaintext-containment.md` — TTY gate and guard hooks so agents cannot expose plaintext, released in 1.9.0
 
 The shared documentation rules and templates live in `../../74-dev-docs`.
-Project plans are intentionally ignored by Git and published at
-<https://kuickr.co/dev-docs-74/localvault-plans>.
+Project plans and session records are internal: both are intentionally ignored
+by Git and published only to private Kuickr folders —
+<https://kuickr.co/dev-docs-74/localvault-plans> and
+<https://kuickr.co/dev-docs-74/localvault-sessions>.
 
 ## Product Documentation
 
 - [organizing-secrets.md](organizing-secrets.md) — naming and grouping secrets
 - [RELEASING.md](RELEASING.md) — release workflow
 - `backlog/` — feature backlogs and PRDs
-- `sessions/` — dated implementation records
+- `sessions/` — dated implementation and release records; internal, ignored by
+  Git and published only to <https://kuickr.co/dev-docs-74/localvault-sessions>
 
 ## Coordination
 
