@@ -174,6 +174,8 @@ module LocalVault
       shell.say "  localvault mcp                Start MCP server (stdio)"
       shell.say "  localvault mcp --check        Check setup and active-vault readiness"
       shell.say "  Agents: list names, then use localvault_build_exec for safe injection"
+      shell.say "  localvault guard install      Block secrets in agent commands (Claude Code hooks)"
+      shell.say "  localvault guard status       Show guard hook installation state"
       shell.say ""
       shell.say "LEGACY SHARING  (pre-v1.2 direct share, still works as fallback)"
       shell.say "  localvault keygen             Generate X25519 keypair (same as `keys generate`)"

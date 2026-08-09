@@ -16,11 +16,28 @@ Part of [InventList Tools](https://inventlist.com/tools/localvault) — free, op
 brew install inventlist/tap/localvault
 ```
 
+### Install script (no Homebrew)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/inventlist/localvault/main/install.sh | sh
+```
+
+Installs into an isolated prefix (`~/.localvault/runtime`) and writes a wrapper
+to your PATH that pins its own Ruby. It never adds a version-manager shim and
+never touches your project gems, so `localvault` keeps working when you switch
+Ruby versions. Override with `LOCALVAULT_BIN_DIR`, `LOCALVAULT_PREFIX`,
+`LOCALVAULT_VERSION`, or `LOCALVAULT_RUBY`.
+
 ### RubyGems
 
 ```bash
 gem install localvault
 ```
+
+A plain `gem install` under asdf/rbenv creates a shim that can shadow your
+Homebrew build and silently pin you to an old version. If `localvault version`
+disagrees with what you installed, run `localvault doctor` — it lists every
+copy on your PATH.
 
 **Requires libsodium:**
 
