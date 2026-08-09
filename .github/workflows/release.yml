@@ -110,7 +110,15 @@ jobs:
 
       - name: Verify RubyGems install
         run: |
-          gem install localvault -v "${{ needs.release.outputs.version }}"
+          # RubyGems' index lags the push by up to a few minutes, so a bare
+          # install here fails the release for a race rather than a defect.
+          VERSION="${{ needs.release.outputs.version }}"
+          for attempt in $(seq 1 10); do
+            gem install localvault -v "$VERSION" && break
+            echo "gem $VERSION not in the index yet (attempt $attempt/10); retrying in 30s"
+            sleep 30
+          done
+          gem list -i localvault -v "$VERSION" || { echo "FAIL: gem $VERSION never became installable"; exit 1; }
 
           # Verify the binary runs
           GEM_VERSION=$(localvault version)
