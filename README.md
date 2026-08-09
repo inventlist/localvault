@@ -145,6 +145,9 @@ backward compatibility but the top-level forms are preferred.
 | `install-mcp [CLIENT]` | Configure MCP server in claude-code, cursor, or windsurf |
 | `mcp` | Start MCP server (stdio transport) |
 | `doctor` | Check install and PATH readiness, including brew/asdf shadowing |
+| `guard install` | Install Claude Code hooks that block secrets in agent commands (v1.9.0) |
+| `guard status` | Show guard hook installation state |
+| `guard hook` | Hook entrypoint (reads hook JSON on stdin; not run by hand) |
 
 All commands accept `--vault NAME` (or `-v NAME`) to target a specific vault. Default vault is `default`.
 
@@ -309,6 +312,39 @@ localvault exec -- rails server
 Unlocking writes a derived key to `LOCALVAULT_SESSION` and also caches it with an 8-hour TTL in Keychain or LocalVault's file fallback so MCP and new terminals can reuse it until `localvault lock`.
 
 ## Security
+
+### Agent Plaintext Containment (v1.9.0)
+
+Two layers keep secrets out of AI agent context and transcripts:
+
+**1. Plaintext refuses captured streams.** `get`, `env`, and `show --reveal`
+print values to an interactive terminal as always. When stdout is captured
+(a pipe or an agent's shell), a human confirms with one keypress on `/dev/tty`;
+an agent's shell has no `/dev/tty`, so it is refused and pointed at injection:
+
+```bash
+localvault get STRIPE_KEY              # human at a terminal: prints
+localvault get STRIPE_KEY | pbcopy     # human piping: "Print plaintext? [y/N]"
+# agent shell: refused → use localvault exec --map STRIPE_KEY=STRIPE_KEY -- CMD
+```
+
+There is deliberately no flag or environment variable to bypass this — the only
+override is a keypress on a real terminal. Headless automation uses
+`localvault exec` injection.
+
+**2. Guard hooks block secrets in agent commands.** `localvault guard install`
+wires Claude Code hooks that scan every Bash tool call against your unlocked
+vaults. A command containing a stored secret value is blocked before it runs,
+naming the key by fingerprint — never by value:
+
+```text
+LocalVault guard: blocked — this tool input contains the plaintext value of
+default/STRIPE.private_key (sha256:1a2b3c4d5e6f). Inject it instead:
+  localvault exec --map STRIPE.private_key=PRIVATE_KEY -- your-command
+```
+
+The installed hook fails open: locked vaults, an old binary, or a missing
+install allow the call rather than breaking your session.
 
 ### Crypto Stack
 

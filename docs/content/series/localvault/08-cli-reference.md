@@ -22,12 +22,32 @@ type: doc
 | `localvault show --reveal` | Show full values |
 | `localvault show --group` | Group flat keys by common prefix (`STRIPE_KEY` + `STRIPE_SECRET` → `STRIPE`) |
 | `localvault show -p PROJECT` | Filter to one project group |
-| `localvault env` | Print `export KEY=value` lines |
+| `localvault env` | Print `export KEY=value` lines (interactive terminal only; see below) |
 | `localvault env -p PROJECT` | Export one project group |
 | `localvault exec -- CMD` | Run command with secrets in env |
 | `localvault import FILE` | Bulk-import from .env/.json/.yml |
 | `localvault rename OLD NEW` | Rename a key |
 | `localvault copy KEY --to VAULT` | Copy a secret to another vault |
+
+### Plaintext output requires a terminal (v1.9.0)
+
+`get`, `env`, and `show --reveal` print plaintext freely when stdout is an
+interactive terminal. When stdout is captured — a pipe, a command
+substitution, or an AI agent's shell — a human is asked to confirm on
+`/dev/tty`:
+
+```bash
+localvault get API_TOKEN            # terminal: prints
+localvault get API_TOKEN | pbcopy   # pipe: "Print plaintext value of 'API_TOKEN'? [y/N]"
+```
+
+An agent's shell has no `/dev/tty` to answer on, so it is refused and pointed
+at process-scoped injection. There is no flag or environment variable to
+bypass the gate; scripts and CI use `localvault exec` instead:
+
+```bash
+localvault exec --map API_TOKEN=API_TOKEN -- your-command
+```
 
 ## Vault management
 
@@ -113,6 +133,9 @@ These pre-v1.2 commands still work as a fallback when a vault isn't a team vault
 | `localvault install-mcp` | Install MCP in Claude Code (default) |
 | `localvault install-mcp cursor` | Install in Cursor |
 | `localvault install-mcp windsurf` | Install in Windsurf |
+| `localvault guard install` | Install Claude Code hooks that block secrets in agent tool calls |
+| `localvault guard install --project` | Install into `./.claude/settings.json` instead of `~/.claude` |
+| `localvault guard status` | Show hook installation state per scope |
 
 ## Global options
 

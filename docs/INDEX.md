@@ -9,6 +9,7 @@
 - `plans/03-contextual-cli-help-implementation.md` — implemented CLI plan
 - `plans/04-mcp-safe-secret-use-implementation.md` — implemented MCP plan
 - `plans/06-safe-secret-input-and-fingerprints.md` — safe stdin writes and versioned secret comparison, targeted for 1.9.0
+- `plans/07-agent-plaintext-containment.md` — TTY gate and guard hooks so agents cannot expose plaintext, released in 1.9.0
 
 The shared documentation rules and templates live in `../../74-dev-docs`.
 Project plans are intentionally ignored by Git and published at
