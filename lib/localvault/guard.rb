@@ -15,6 +15,40 @@ module LocalVault
   # check gets uninstalled.
   module Guard
     MIN_VALUE_LENGTH = 8
+
+    # Keys whose values are public identifiers, not credentials. Scanning these
+    # made the guard unusable in practice: a bucket name or project slug is a
+    # substring of ordinary paths, so every `cd` into the matching project was
+    # denied, and the operator learns to distrust the guard entirely.
+    #
+    # Matched against the key's FINAL segment only, and vetoed by SECRET_WORDS —
+    # so `CLOUDFLARE.r2_bucket` is exempt while `CLOUDFLARE.r2_bucket_secret_key`
+    # is still guarded. A guard that cries wolf gets uninstalled, which protects
+    # nothing; a guard that stays quiet on public config keeps its credibility
+    # for the values that matter.
+    # Deliberately minimal. Only identifiers that cannot themselves carry a
+    # credential belong here.
+    #
+    # `url`, `uri`, `endpoint` and `dsn` are POINTEDLY ABSENT: a connection
+    # string routinely embeds a password (`postgres://user:pass@host/db`), so
+    # exempting them would turn this guard into a false-negative machine. The
+    # first draft of this list did include `url`, and the existing suite caught
+    # it — see test_pre_tool_use_scans_nested_input_structures. Left as a warning
+    # to anyone tempted to extend the list for convenience: a public-sounding
+    # key name does not mean a public value.
+    #
+    # Also absent: `user`, `username`, `email`, `profile`, `path`, `namespace` —
+    # too generic to assert anything about the value.
+    PUBLIC_KEY_SUFFIXES = %w[
+      bucket region zone
+      account_id project_id zone_id org_id workspace_id
+      handle
+    ].freeze
+
+    # If the key names any of these, it is a credential no matter what else the
+    # key says. The veto always wins over PUBLIC_KEY_SUFFIXES.
+    SECRET_WORDS = %w[secret key token password passwd credential auth signature cert private].freeze
+
     HOOK_ENTRYPOINT = "localvault guard hook".freeze
     # The installed command must fail open on machines where the binary is
     # old, missing, or broken — otherwise every Bash call errors for users
@@ -61,10 +95,24 @@ module LocalVault
       secrets.filter_map do |entry|
         value = entry[:value]
         next if value.nil? || value.length < MIN_VALUE_LENGTH
+        next if public_identifier?(entry[:key])
         next unless text.include?(value)
 
         Match.new(vault: entry[:vault], key: entry[:key], fingerprint: fingerprint(value))
       end
+    end
+
+    # Is this key a public identifier rather than a credential?
+    #
+    # Reads the key's final segment: `CLOUDFLARE.r2_bucket` → `r2_bucket`. Any
+    # SECRET_WORDS present vetoes the exemption, so a key can never become
+    # unguarded by ending in a public-sounding noun.
+    def self.public_identifier?(key)
+      segment = key.to_s.split(".").last.to_s.downcase
+      return false if segment.empty?
+      return false if SECRET_WORDS.any? { |word| segment.include?(word) }
+
+      PUBLIC_KEY_SUFFIXES.any? { |suffix| segment == suffix || segment.end_with?("_#{suffix}") }
     end
 
     def self.fingerprint(value)
