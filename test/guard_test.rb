@@ -1,4 +1,5 @@
 require_relative "test_helper"
+require "tmpdir"
 
 class GuardTest < Minitest::Test
   SECRETS = [
@@ -27,46 +28,61 @@ class GuardTest < Minitest::Test
     assert_empty LocalVault::Guard.scan("localvault exec --profile aws -- aws s3 ls", SECRETS)
   end
 
-  # A bucket name, region, hostname or account id is a public identifier, not a
-  # credential. Storing one alongside real secrets used to make the guard
-  # unusable: a value like a project slug appears in ordinary paths, so every
-  # `cd` into that project was denied. Non-secret keys are scanned past.
-  def test_scan_ignores_conventionally_public_keys
-    public_keys = [
-      { vault: "acme", key: "CLOUDFLARE.r2_bucket", value: "my-project-assets" },
-      { vault: "acme", key: "AWS.region",           value: "eu-west-2" },
-      { vault: "acme", key: "STRIPE.account_id",    value: "acct_1234567890" }
-    ]
+  # A public identifier stored beside real secrets (a bucket name that is a
+  # substring of a project path) denies every command mentioning that path. The
+  # operator opts that ONE key out by exact name; nothing is inferred.
+  def test_scan_skips_keys_the_operator_explicitly_ignored
+    keys = [ { vault: "acme", key: "CLOUDFLARE.r2_bucket", value: "my-project-assets" } ]
+    text = "cd ~/Code/my-project-assets && ls"
 
-    text = "cd ~/Code/my-project-assets && aws --region eu-west-2 s3 ls"
-
-    assert_empty LocalVault::Guard.scan(text, public_keys)
+    assert_empty LocalVault::Guard.scan(text, keys, ignore: [ "CLOUDFLARE.r2_bucket" ])
+    assert_equal 1, LocalVault::Guard.scan(text, keys, ignore: []).size
   end
 
-  # A connection string embeds a password, so a key ending in url/uri/endpoint/dsn
-  # must NEVER be exempt however public the noun sounds. The first draft of the
-  # exemption list included `url` and silently unguarded this value.
-  def test_scan_never_exempts_connection_strings
+  # The audit finding that killed the first design: a NAME-based exemption
+  # exempts whatever the value happens to be, so `AWS.bucket` holding a live key
+  # was silently unguarded. An exact-key allowlist cannot make that mistake,
+  # because the operator names the specific key they vouched for.
+  def test_a_public_sounding_key_is_not_exempt_by_itself
+    keys = [ { vault: "acme", key: "AWS.bucket", value: "sk_live_abcdef1234567890" } ]
+
+    matches = LocalVault::Guard.scan("curl -H 'Authorization: sk_live_abcdef1234567890'", keys, ignore: [])
+
+    assert_equal [ "AWS.bucket" ], matches.map(&:key),
+      "a key that merely SOUNDS public must still be scanned"
+  end
+
+  # Ignoring one key must not ignore siblings, prefixes, or suffixes.
+  def test_ignore_matches_the_full_key_exactly
     keys = [
-      { vault: "acme", key: "DB.url",         value: "postgres://user:pass@host/db" },
-      { vault: "acme", key: "REDIS.uri",      value: "redis://:hunter2@10.0.0.5:6379" },
-      { vault: "acme", key: "SENTRY.dsn",     value: "https://abc123@o1.ingest.io/42" },
-      { vault: "acme", key: "VAULT.endpoint", value: "https://tok:xyz789@vault.internal" }
+      { vault: "acme", key: "CLOUDFLARE.r2_bucket",            value: "public-bucket-name" },
+      { vault: "acme", key: "CLOUDFLARE.r2_bucket_access_key", value: "sk_live_abcdef1234567890" }
     ]
+    text = "public-bucket-name sk_live_abcdef1234567890"
 
-    text = keys.map { |k| k[:value] }.join(" ")
+    matches = LocalVault::Guard.scan(text, keys, ignore: [ "CLOUDFLARE.r2_bucket" ])
 
-    assert_equal 4, LocalVault::Guard.scan(text, keys).size
+    assert_equal [ "CLOUDFLARE.r2_bucket_access_key" ], matches.map(&:key)
   end
 
-  # The exemption is by key NAME only. A key that merely contains a public-ish
-  # word must still be guarded when it names an actual credential.
-  def test_scan_still_guards_secrets_whose_key_resembles_a_public_one
-    secrets = [ { vault: "acme", key: "CLOUDFLARE.r2_bucket_secret_key", value: "sk_live_abcdef1234567890" } ]
+  def test_ignored_keys_reads_the_operator_config
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "config.yml")
+      File.write(path, "guard_ignore:\n  - CLOUDFLARE.r2_bucket\n  - AWS.account_id\n")
 
-    matches = LocalVault::Guard.scan("curl -H 'Authorization: sk_live_abcdef1234567890'", secrets)
+      assert_equal [ "CLOUDFLARE.r2_bucket", "AWS.account_id" ], LocalVault::Guard.ignored_keys(path)
+    end
+  end
 
-    assert_equal [ "CLOUDFLARE.r2_bucket_secret_key" ], matches.map(&:key)
+  # A malformed or absent config must never widen the exemption.
+  def test_unreadable_config_ignores_nothing
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "config.yml")
+      File.write(path, "guard_ignore: [unclosed")
+
+      assert_empty LocalVault::Guard.ignored_keys(path)
+      assert_empty LocalVault::Guard.ignored_keys(File.join(dir, "absent.yml"))
+    end
   end
 
   def test_fingerprint_is_stable_and_not_the_value
