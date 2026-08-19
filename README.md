@@ -88,11 +88,11 @@ localvault exec -- rails server
 | `init [NAME]` | Create a vault (Argon2id key derivation) |
 | `set KEY --stdin` | Store a secret from stdin without argv/history exposure |
 | `set KEY [VALUE]` | Store a secret (positional value kept for compatibility) |
-| `set --group GROUP KEY --stdin` | Store a secret in a named group from stdin |
+| `set --group GROUP KEY --stdin` | Store a secret in a named group from stdin (`-g`) |
 | `get KEY` | Retrieve a secret (raw, pipeable) |
 | `show` | Display all secrets in a table (masked by default) |
-| `show --reveal` | Display with values visible |
-| `show --group` | Group by dot-notation prefix (one table per project) |
+| `show --reveal` | Display with values visible (`-r`) |
+| `show --group` | Group by dot-notation prefix, one table per project (`-g`) |
 | `show --group QUERY` | Show one exact or uniquely matching group |
 | `groups [QUERY]` | List/search group names and key counts without values |
 | `list` | List key names only |

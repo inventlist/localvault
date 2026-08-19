@@ -243,7 +243,7 @@ module LocalVault
       Use `localvault show -p platepose -v vault` to view a single project.
       Use `localvault import` to bulk-load from a .env, .json, or .yml file.
     DESC
-    method_option :group, type: :string, desc: "Store KEY and VALUE inside this named group"
+    method_option :group, aliases: "-g", type: :string, desc: "Store KEY and VALUE inside this named group"
     method_option :stdin, type: :boolean, default: false, desc: "Read VALUE from stdin instead of argv"
     def set(key, value = nil)
       validate_secret_value_source!(value)
@@ -526,8 +526,8 @@ module LocalVault
 \x05    localvault show -p platepose -v intellectaco  # one project only
 \x05    localvault show -p platepose -v intellectaco --reveal
     DESC
-    method_option :group, type: :string, lazy_default: GROUP_ALL_SENTINEL, desc: "Show all groups or one group by name"
-    method_option :reveal,  type: :boolean, default: false, desc: "Show full values instead of masking"
+    method_option :group, aliases: "-g", type: :string, lazy_default: GROUP_ALL_SENTINEL, desc: "Show all groups or one group by name"
+    method_option :reveal, aliases: "-r", type: :boolean, default: false, desc: "Show full values instead of masking"
     method_option :project, aliases: "-p", type: :string,   desc: "Show only this project group"
     def show
       vault = open_vault!

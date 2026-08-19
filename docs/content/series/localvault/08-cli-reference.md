@@ -14,13 +14,13 @@ type: doc
 | `localvault demo` | Create demo vaults with fake data for learning (passphrase: `demo`) |
 | `localvault set KEY --stdin` | Store a secret from stdin without argv/history exposure |
 | `localvault set KEY [VALUE]` | Store a secret; positional value is the compatibility path |
-| `localvault set --group GROUP KEY --stdin` | Store a grouped secret from stdin |
+| `localvault set --group GROUP KEY --stdin` | Store a grouped secret from stdin (`-g`) |
 | `localvault get KEY` | Retrieve a secret value |
 | `localvault list` | List all secret keys |
 | `localvault delete KEY` | Remove a secret or project group |
 | `localvault show` | Display secrets in a table (masked) |
-| `localvault show --reveal` | Show full values |
-| `localvault show --group` | Group flat keys by common prefix (`STRIPE_KEY` + `STRIPE_SECRET` → `STRIPE`) |
+| `localvault show --reveal` | Show full values (`-r`) |
+| `localvault show --group` | Group flat keys by common prefix (`STRIPE_KEY` + `STRIPE_SECRET` → `STRIPE`); `-g` |
 | `localvault show -p PROJECT` | Filter to one project group |
 | `localvault env` | Print `export KEY=value` lines (interactive terminal only; see below) |
 | `localvault env -p PROJECT` | Export one project group |

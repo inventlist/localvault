@@ -54,6 +54,34 @@ class CLITest < Minitest::Test
     end
   end
 
+  # -p and -v had short aliases while -g and -r did not, so `show -g NAME`
+  # failed with "needs a different combination of arguments" — an error that
+  # never mentions the undefined flag.
+  def test_show_accepts_short_aliases_for_group_and_reveal
+    vault = create_test_vault("default")
+    vault.set("STRIPE.API_KEY", "sk-secret")
+
+    with_session("default") do
+      short, = capture_io { LocalVault::CLI.start(%w[show -g STRIPE]) }
+      long,  = capture_io { LocalVault::CLI.start(%w[show --group STRIPE]) }
+      assert_equal long, short
+
+      revealed, = capture_io { LocalVault::CLI.start(%w[show -r -g STRIPE]) }
+      assert_includes revealed, "sk-secret"
+    end
+  end
+
+  def test_set_accepts_short_alias_for_group
+    create_test_vault("default")
+
+    with_session("default") do
+      capture_io { LocalVault::CLI.start(%w[set -g BILLING TOKEN tok-value]) }
+      out, = capture_io { LocalVault::CLI.start(%w[show -r -g BILLING]) }
+      assert_includes out, "TOKEN"
+      assert_includes out, "tok-value"
+    end
+  end
+
   def test_show_group_can_select_names_that_match_old_internal_sentinels
     vault = create_test_vault("default")
     vault.set("__all__.KEY", "all-secret")
