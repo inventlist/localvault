@@ -1,33 +1,31 @@
 # LocalVault Docs Index
 
+**This repo is public.** All internal planning and coordination — plans,
+backlog, sessions, agent roster, threads — lives in the private
+`inventlist/101.2-localvault-docs` repo instead, not here. This index only
+covers what actually stays in this repo.
+
 ## Start Here
 
 - [PILLARS.md](PILLARS.md) — project pillar lock
-- `plans/00-delivery-sequence.md` — implementation order; local and Kuickr only
-- `plans/01-contextual-cli-help.md` — CLI help and group design, released in 1.8.0
-- `plans/02-mcp-safe-secret-use.md` — MCP safety and setup design, released in 1.8.0
-- `plans/03-contextual-cli-help-implementation.md` — implemented CLI plan
-- `plans/04-mcp-safe-secret-use-implementation.md` — implemented MCP plan
-- `plans/06-safe-secret-input-and-fingerprints.md` — safe stdin writes and versioned secret comparison, targeted for 1.9.0
-- `plans/07-agent-plaintext-containment.md` — TTY gate and guard hooks so agents cannot expose plaintext, released in 1.9.0
 
-The shared documentation rules and templates live in `../../74-dev-docs`.
-Project plans and session records are internal: both are intentionally ignored
-by Git and published only to private Kuickr folders —
-<https://kuickr.co/dev-docs-74/localvault-plans> and
-<https://kuickr.co/dev-docs-74/localvault-sessions>.
+Numbered plans (`plans/01-contextual-cli-help.md`, etc.) live in
+`../101.2-localvault-docs/plans/` — private, gitignored here, published to
+the private folders of the `localvault` Kuickr space
+(`kuickr.co/localvault/plans`). The shared documentation rules and templates
+live in `../../74-dev-docs`.
 
 ## Product Documentation
 
 - [organizing-secrets.md](organizing-secrets.md) — naming and grouping secrets
 - [RELEASING.md](RELEASING.md) — release workflow
-- `backlog/` — feature backlogs and PRDs; internal, ignored by Git (this is a
-  public repo). Lives in the private `inventlist/101.2-localvault-docs`
-  repo at `backlog/active/` instead.
-- `sessions/` — dated implementation and release records; internal, ignored by
-  Git and published only to <https://kuickr.co/dev-docs-74/localvault-sessions>
+- `backlog/`, `sessions/`, `agents/`, `threads/` — all internal, all
+  gitignored here (this is a public repo). Live in the private
+  `inventlist/101.2-localvault-docs` repo instead, published to the private
+  folders of the `localvault` Kuickr space
+  (`kuickr.co/localvault/{backlog,sessions}`).
 
-## Coordination
+## Showcase (public, on Kuickr)
 
-- `agents/00-roster.md` — stable agent aliases and roles
-- `threads/` — living agent-to-agent conversations
+- `kuickr.co/localvault/guide` — getting-started guide
+- `kuickr.co/localvault/series` — the educational content series
