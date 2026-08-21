@@ -21,7 +21,9 @@ by Git and published only to private Kuickr folders —
 
 - [organizing-secrets.md](organizing-secrets.md) — naming and grouping secrets
 - [RELEASING.md](RELEASING.md) — release workflow
-- `backlog/` — feature backlogs and PRDs
+- `backlog/` — feature backlogs and PRDs; internal, ignored by Git (this is a
+  public repo). Lives in the private `inventlist/101.2-localvault-docs`
+  repo at `backlog/active/` instead.
 - `sessions/` — dated implementation and release records; internal, ignored by
   Git and published only to <https://kuickr.co/dev-docs-74/localvault-sessions>
 
