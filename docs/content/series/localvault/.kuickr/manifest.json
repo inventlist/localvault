@@ -1,0 +1,30 @@
+{
+  "org": "localvault",
+  "folder": "series",
+  "host": "https://kuickr.co",
+  "source": {
+    "repo_url": "https://github.com/inventlist/localvault",
+    "branch": "main",
+    "source_path": "docs/content/series/localvault"
+  },
+  "files": {
+    "01-getting-started.md": "c3497865bf430bed9a7373e95ac95437fa92aef1b010f4660545822b94ca2515",
+    "02-organizing-secrets.md": "1e7029e6a13e7031704ba1d6fe3cb9b7a3980d70cd6d223d554e8b51b62db215",
+    "03-mcp-for-ai-agents.md": "e13366ad3d2e349998e954c67ee4cb9ed91f6006f469e52476be8e4402d36dab",
+    "04-why-i-built-this.md": "c4d3f8bf9cfd3f8e9e032d37ff15a97f77d4e49f8499394e08234e0b6fb4c276",
+    "05-designing-sync.md": "b12d937f892dea349351a970ef6560cab79f150f4a06f2032b41288ba70893f0",
+    "06-sync-how-it-works.md": "9c0c9704a658341cb464a6e217ac1d314bd0a16bde7e2be2fbd18c18c15588c3",
+    "07-security-model.md": "cc74682f12132b68a939dd57dcaa1a48f6ccc46e2a00863aaeac017f5d00faab",
+    "08-cli-reference.md": "6683d4b62d493e76f74d309b61972fd343c18103a234aa839221d6c166001d30",
+    "09-team-sync-and-key-slots.md": "6e6f9fc4699b9b72e4d7c93522ec62885f53d3ccff871f62f5653fdce0e2b45e",
+    "10-mcp-config-leaking-secrets.md": "b1b4a724e17ab8eb4296d52b7d230634a2880832f30bdbcb08d36a2c5095cc9f",
+    "11-team-init-and-scoped-sharing.md": "c6fb1a1280d3952c9a36c833e8b5e6628f219336356a8498463f43a2f4dea166",
+    "12-rotation-revocation-and-push-auth.md": "99535ed7c6285c12454e43c42b52bbb2139bfddb7436a905f9c271f425c3bb7a",
+    "13-personal-sync.md": "cbd4735f77aebd1bdb4303cc122e153592fdda19151d23da0c41762b7a43661b",
+    "14-mcp-first-localvault.md": "8c871920f996c84b8697da4461e48a7a146b960165eed65779ea7c58b9d60804",
+    "15-scoped-env-injection.md": "616e4c386c51226d757b516b2ba2df7928311b4932d913d12cb6e40f9b3da31c",
+    "16-safe-stdin-writes-and-doctor.md": "f55ea3d05ed6e9290a56a67b0d50b63991dce45481310f814fd54231ae267cb9",
+    "17-when-guidance-is-not-enough.md": "0a152442e2a7880ad26e7588e52505558359d5f1a446f18ec66257282af9a62c",
+    "_meta.json": "7eae4c8c10a094a818f65cbc96d690a6489c0d98bb712b2b6c89edaa7238cea2"
+  }
+}

@@ -5,3 +5,6 @@ vendor/bundle/
 # Planning source is local + Kuickr; the shared harness lives in ../74-dev-docs.
 docs/plans/
 docs/sessions/
+docs/backlog/
+docs/agents/
+docs/threads/
