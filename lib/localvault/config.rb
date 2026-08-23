@@ -122,6 +122,27 @@ module LocalVault
       save(data)
     end
 
+    # Read the local identity alias.
+    #
+    # @return [String, nil] the stored alias, or nil
+    def self.identity_alias
+      load["identity_alias"]
+    end
+
+    # Set the local identity alias. Pass +nil+ to clear it.
+    #
+    # @param a [String, nil] the alias to store
+    # @return [void]
+    def self.identity_alias=(a)
+      data = load
+      if a.nil?
+        data.delete("identity_alias")
+      else
+        data["identity_alias"] = a
+      end
+      save(data)
+    end
+
     # Read the InventList API base URL.
     #
     # @return [String] the API URL, defaults to "https://inventlist.com"
