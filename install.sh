@@ -95,6 +95,16 @@ exec "$RUBY" "$PREFIX/bin/$BINARY" "\$@"
 WRAPPER
 chmod +x "$BIN_DIR/$BINARY"
 
+# Short alias `lv` — skipped if something else already owns that name.
+# Change or remove it freely; `localvault` is the canonical binary.
+EXISTING_LV="$(command -v lv 2>/dev/null || true)"
+if [ -z "$EXISTING_LV" ] || [ "$EXISTING_LV" = "$BIN_DIR/lv" ]; then
+  ln -sf "$BIN_DIR/$BINARY" "$BIN_DIR/lv"
+  info "alias: lv → $BINARY"
+else
+  warn "skipping the 'lv' alias — $EXISTING_LV already exists"
+fi
+
 INSTALLED="$("$BIN_DIR/$BINARY" version 2>/dev/null || echo "")"
 [ -n "$INSTALLED" ] || err "installed, but $BIN_DIR/$BINARY did not run — check ruby and libsodium"
 info "installed $INSTALLED → $BIN_DIR/$BINARY"

@@ -21,7 +21,7 @@ Gem::Specification.new do |spec|
 
   spec.files         = Dir["lib/**/*", "bin/*", "LICENSE", "README.md"]
   spec.bindir        = "bin"
-  spec.executables   = ["localvault"]
+  spec.executables   = ["localvault", "lv"]
 
   spec.add_dependency "thor", "~> 1.3"
   spec.add_dependency "rbnacl", "~> 7.1"
