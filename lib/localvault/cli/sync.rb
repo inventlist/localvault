@@ -468,8 +468,8 @@ module LocalVault
         $stderr.puts "  localvault login YOUR_TOKEN"
         $stderr.puts
         $stderr.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
-        $stderr.puts "New to InventList? Sign up free at https://inventlist.com"
-        $stderr.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
+        $stderr.puts "Or use your own server: localvault config set server URL (free InventList account: https://inventlist.com)"
+        $stderr.puts "Docs: https://kuickr.co/localvault/series"
         false
       end
 

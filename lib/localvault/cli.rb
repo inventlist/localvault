@@ -119,9 +119,10 @@ module LocalVault
       super
       shell.say ""
       shell.say "GETTING STARTED"
-      shell.say "  localvault login [TOKEN]      Log in to InventList (enables sync + team features)"
       shell.say "  localvault init [NAME]        Create a new encrypted vault"
       shell.say "  localvault demo               Create a demo vault to explore commands"
+      shell.say "  localvault login [TOKEN]      Log in to a sync server (enables sync + team features)"
+      shell.say "  localvault config set server URL   Use your own sync host (default: inventlist.com)"
       shell.say ""
       shell.say "SAFE SECRET INPUT  (preferred over passing values as arguments)"
       shell.say "  printf '%s' \"$SECRET\" | localvault set KEY --stdin"
@@ -760,13 +761,16 @@ module LocalVault
       $stdout.puts "Public key: #{Identity.public_key}"
     end
 
-    desc "login [TOKEN]", "Log in to InventList — validate token, auto-keygen, publish public key"
+    desc "login [TOKEN]", "Log in to a sync server — validate token, auto-keygen, publish public key"
     method_option :status, type: :boolean, default: false, desc: "Show current login status"
+    method_option :server, type: :string, desc: "Sync server URL (persisted; defaults to https://inventlist.com)"
     def login(token = nil)
+      Config.api_url = options[:server] if options[:server]
+
       if options[:status]
         handle = Config.inventlist_handle
         if handle
-          $stdout.puts "Logged in as @#{handle}"
+          $stdout.puts "Logged in as @#{handle} (server: #{Config.api_url})"
         else
           $stdout.puts "Not logged in. Run: localvault login TOKEN"
         end
@@ -776,13 +780,26 @@ module LocalVault
       unless token
         $stdout.puts "Usage: localvault login YOUR_TOKEN"
         $stdout.puts
-        $stdout.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
-        $stdout.puts "New to InventList? Sign up free at https://inventlist.com"
+        $stdout.puts "Local vault encryption works without any account or server."
+        $stdout.puts "Sync and team features need a sync server. LocalVault is server-agnostic —"
+        $stdout.puts "pick either:"
         $stdout.puts
-        $stdout.puts "LocalVault sync and team features require a free InventList account."
-        $stdout.puts "Local vault encryption works without an account."
+        $stdout.puts "  1. Your own host (any server implementing the 4-endpoint protocol):"
+        $stdout.puts "       localvault config set server https://vaulthost.example"
+        $stdout.puts "       localvault login YOUR_TOKEN"
+        $stdout.puts "     (or one-shot: localvault login YOUR_TOKEN --server https://vaulthost.example)"
         $stdout.puts
-        $stdout.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
+        $stdout.puts "  2. InventList (free account):"
+        $stdout.puts "       Sign up at https://inventlist.com, then get your token at"
+        $stdout.puts "       https://inventlist.com/@YOUR_HANDLE/edit#developer"
+        $stdout.puts
+        $stdout.puts "Login generates your X25519 keypair and publishes the public key"
+        $stdout.puts "automatically. To do it manually:"
+        $stdout.puts "  localvault keys generate      # create keypair in ~/.localvault/keys/"
+        $stdout.puts "  localvault keys publish       # upload public key so others can share with you"
+        $stdout.puts "  localvault keys show          # print your public key"
+        $stdout.puts
+        $stdout.puts "Docs: https://kuickr.co/localvault/series"
         return
       end
 
@@ -798,15 +815,53 @@ module LocalVault
 
       client.publish_public_key(Identity.public_key)
 
-      $stdout.puts "Logged in as @#{handle}"
-      $stdout.puts "Public key published to your InventList profile."
+      $stdout.puts "Logged in as @#{handle} (server: #{Config.api_url})"
+      $stdout.puts "Public key published to your profile."
       $stdout.puts
-      $stdout.puts "Next: localvault sync push   # sync your vault to the cloud"
+      $stdout.puts "Next: localvault sync push   # sync your vault to the server"
     rescue ApiClient::ApiError => e
       if e.status == 401
-        $stdout.puts "Invalid token. Check your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
+        $stdout.puts "Invalid token for #{Config.api_url}."
+        $stdout.puts "InventList tokens: https://inventlist.com/@YOUR_HANDLE/edit#developer"
       else
-        $stdout.puts "Error connecting to InventList: #{e.message}"
+        $stdout.puts "Error connecting to #{Config.api_url}: #{e.message}"
+      end
+    end
+
+    desc "config SUBCOMMAND ...", "Get or set CLI configuration (currently: server)"
+    long_desc <<~DESC
+      Read or write LocalVault configuration in ~/.localvault/config.yml.
+
+      LocalVault is server-agnostic — point it at any host implementing the
+      sync protocol:
+
+      \x05    localvault config get server
+      \x05    localvault config set server https://vaulthost.example
+      \x05    localvault config unset server              # back to https://inventlist.com
+    DESC
+    def config(action = "get", field = nil, value = nil)
+      unless field == "server" || (action == "get" && field.nil?)
+        return abort_with "Unknown config field '#{field}'. Supported: server"
+      end
+
+      case action
+      when "get"
+        $stdout.puts "server: #{Config.api_url}"
+      when "set"
+        return abort_with "Usage: localvault config set server URL" unless value
+        unless value.match?(%r{\Ahttps?://\S+\z})
+          return abort_with "Server must be an http(s) URL, e.g. https://vaulthost.example"
+        end
+        Config.api_url = value
+        $stdout.puts "server set to #{value}"
+        $stdout.puts "Note: tokens are per-server — run `localvault login YOUR_TOKEN` for this host."
+      when "unset"
+        data = Config.load
+        data.delete("api_url")
+        Config.save(data)
+        $stdout.puts "server reset to #{Config.api_url}"
+      else
+        abort_with "Usage: localvault config [get|set|unset] server [URL]"
       end
     end
 
@@ -1143,8 +1198,8 @@ module LocalVault
         $stderr.puts "  localvault login YOUR_TOKEN"
         $stderr.puts
         $stderr.puts "Get your token at: https://inventlist.com/@YOUR_HANDLE/edit#developer"
-        $stderr.puts "New to InventList? Sign up free at https://inventlist.com"
-        $stderr.puts "Docs: https://inventlist.com/sites/localvault/series/localvault"
+        $stderr.puts "Or use your own server: localvault config set server URL (free InventList account: https://inventlist.com)"
+        $stderr.puts "Docs: https://kuickr.co/localvault/series"
         return
       end
 
