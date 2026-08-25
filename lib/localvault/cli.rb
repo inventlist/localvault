@@ -124,30 +124,41 @@ module LocalVault
       ["OTHER",                                                 %w[logout version doctor help]]
     ].freeze
 
+    # One row per plain command; registered subcommands (sync, team, keys,
+    # guard, identity, ...) expand to a row per action, straight from that
+    # registry — so `sync push` or a newly added `guard` action is always
+    # visible without touching this method.
+    def self.help_rows_for(name)
+      command = all_commands[name.tr("-", "_")]
+      return [] if command.nil? || command.hidden?
+
+      registry = subcommand_classes[command.name]
+      return [[command.usage, command.description]] unless registry
+
+      registry.all_commands.filter_map do |sub_name, sub|
+        next if sub.hidden? || %w[help tree].include?(sub_name)  # Thor built-ins, redundant per-namespace
+        ["#{command.name} #{sub.usage}", sub.description]
+      end
+    end
+
     def self.help(shell, subcommand = false)
-      visible = all_commands.reject { |_, c| c.hidden? }
-      width   = visible.values.map { |c| c.usage.length }.max + 4
+      sections = HELP_SECTIONS.map { |title, names| [title, names.dup] }
+      known    = HELP_SECTIONS.flat_map { |_, names| names.map { |n| n.tr("-", "_") } }
+      leftovers = all_commands.reject { |_, c| c.hidden? }.keys - known
+      sections.last[1].concat(leftovers.map { |n| n.tr("_", "-") })
+
+      rendered = sections.map { |title, names| [title, names.flat_map { |n| help_rows_for(n) }] }
+      width = rendered.flat_map { |_, rows| rows.map { |usage, _| usage.length } }.max + 4
 
       shell.say ""
       shell.say "LocalVault — encrypted local secrets vault with MCP support for AI agents"
       shell.say "  https://inventlist.com/tools/localvault"
 
-      listed = []
-      sections = HELP_SECTIONS.map { |title, names| [title, names.dup] }
-      leftovers = visible.keys - HELP_SECTIONS.flat_map { |_, names| names.map { |n| n.tr("-", "_") } }
-      sections.last[1].concat(leftovers.map { |n| n.tr("_", "-") })
-
-      sections.each do |title, names|
-        rows = names.filter_map do |name|
-          command = visible[name.tr("-", "_")]
-          next unless command
-          listed << name
-          "  localvault #{command.usage.ljust(width)}#{command.description}"
-        end
+      rendered.each do |title, rows|
         next if rows.empty?
         shell.say ""
         shell.say title
-        rows.each { |row| shell.say row }
+        rows.each { |usage, desc| shell.say "  localvault #{usage.ljust(width)}#{desc}" }
       end
 
       shell.say ""
