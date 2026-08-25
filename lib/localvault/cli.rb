@@ -108,25 +108,51 @@ module LocalVault
 
     class_option :vault, aliases: "-v", type: :string, desc: "Vault name"
 
-    # Main help = Thor's auto-generated command list (always complete, so new
-    # commands appear without touching this file) + a handwritten guide for
-    # the concepts and workflows Thor can't derive from command descriptions.
+    # Grouped help, generated from the command registry. Only command NAMES
+    # are declared per section — usage strings and descriptions come from
+    # Thor, and any command missing from this map lands in OTHER instead of
+    # disappearing from help.
+    HELP_SECTIONS = [
+      ["GETTING STARTED",                                       %w[login config init demo]],
+      ["SECRETS",                                               %w[set get show groups list delete import env exec]],
+      ["VAULT MANAGEMENT",                                      %w[vaults switch rekey unlock lock reset rename copy]],
+      ["SYNC  (requires localvault login)",                     %w[sync]],
+      ["TEAM SHARING  (requires localvault login)",             %w[dashboard verify add remove team]],
+      ["KEYS  (X25519 identity for vault sharing)",             %w[keys identity]],
+      ["AI / MCP",                                              %w[install-mcp mcp guard]],
+      ["LEGACY SHARING  (pre-v1.2 direct share, still works)",  %w[keygen share receive revoke]],
+      ["OTHER",                                                 %w[logout version doctor help]]
+    ].freeze
+
     def self.help(shell, subcommand = false)
+      visible = all_commands.reject { |_, c| c.hidden? }
+      width   = visible.values.map { |c| c.usage.length }.max + 4
+
       shell.say ""
       shell.say "LocalVault — encrypted local secrets vault with MCP support for AI agents"
       shell.say "  https://inventlist.com/tools/localvault"
-      shell.say ""
-      super
-      shell.say ""
-      shell.say "GETTING STARTED"
-      shell.say "  localvault init [NAME]        Create a new encrypted vault"
-      shell.say "  localvault demo               Create a demo vault to explore commands"
-      shell.say "  localvault login [TOKEN]      Log in to a sync server (enables sync + team features)"
-      shell.say "  localvault config set server URL   Use your own sync host (default: inventlist.com)"
+
+      listed = []
+      sections = HELP_SECTIONS.map { |title, names| [title, names.dup] }
+      leftovers = visible.keys - HELP_SECTIONS.flat_map { |_, names| names.map { |n| n.tr("-", "_") } }
+      sections.last[1].concat(leftovers.map { |n| n.tr("_", "-") })
+
+      sections.each do |title, names|
+        rows = names.filter_map do |name|
+          command = visible[name.tr("-", "_")]
+          next unless command
+          listed << name
+          "  localvault #{command.usage.ljust(width)}#{command.description}"
+        end
+        next if rows.empty?
+        shell.say ""
+        shell.say title
+        rows.each { |row| shell.say row }
+      end
+
       shell.say ""
       shell.say "SAFE SECRET INPUT  (preferred over passing values as arguments)"
       shell.say "  printf '%s' \"$SECRET\" | localvault set KEY --stdin"
-      shell.say "                                Store a secret without argv/history exposure"
       shell.say ""
       shell.say "PROJECTS  (dot-notation groups inside one vault)"
       shell.say "  localvault set platepose.API_KEY v    Store a key in the 'platepose' group"
@@ -137,18 +163,8 @@ module LocalVault
       shell.say "  localvault exec -- inventlist ships list"
       shell.say "  localvault exec -- curl -H \"Authorization: Bearer $API_KEY\" ..."
       shell.say ""
-      shell.say "TEAM SHARING  (requires localvault login)"
-      shell.say "  Convert with `team init`, then `add @HANDLE` / `remove @HANDLE`."
-      shell.say "  Use --scope KEY... for partial access; `team rotate` re-keys for all members."
-      shell.say "  `team add/remove/verify` also work as aliases for the top-level commands."
-      shell.say ""
-      shell.say "AI / MCP"
-      shell.say "  Agents: list secret names, then use localvault_build_exec for safe injection."
-      shell.say "  `guard install` blocks plaintext secrets in agent commands (Claude Code hooks)."
-      shell.say ""
-      shell.say "LEGACY SHARING  (pre-v1.2 direct share, still works as fallback)"
-      shell.say "  keygen / share / receive / revoke — superseded by `keys` + team vaults."
-      shell.say ""
+      shell.say "Own sync host: localvault config set server URL (default: inventlist.com)"
+      shell.say "Subcommands:   localvault help team|keys|guard|identity|sync"
       shell.say "Full help for any command: localvault help COMMAND"
       shell.say ""
     end
