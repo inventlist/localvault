@@ -66,7 +66,9 @@ module LocalVault
 
     def self.start(given_args = ARGV, config = {})
       require_relative "cli/error_presenter"
-      config[:shell] ||= Thor::Base.shell.new
+      require_relative "cli/help_shell"
+      Thor::Base.shell = HelpShell   # subcommand namespaces build their own shells
+      config[:shell] ||= HelpShell.new
       result = dispatch(nil, normalize_legacy_group_option(given_args.dup), nil, config)
       result.is_a?(CommandStatus) ? result.code : 0
     rescue Thor::Error => error
@@ -150,8 +152,6 @@ module LocalVault
       rendered = sections.map { |title, names| [title, names.flat_map { |n| help_rows_for(n) }] }
       width = rendered.flat_map { |_, rows| rows.map { |usage, _| usage.length } }.max + 4
 
-      say_header = ->(text) { shell.say shell.set_color(text, :cyan, true) }
-
       shell.say ""
       shell.say shell.set_color("LocalVault", :cyan, true) + " — encrypted local secrets vault with MCP support for AI agents"
       shell.say "  https://inventlist.com/tools/localvault"
@@ -159,22 +159,22 @@ module LocalVault
       rendered.each do |title, rows|
         next if rows.empty?
         shell.say ""
-        say_header.call(title)
+        shell.say title
         rows.each do |usage, desc|
           shell.say "  localvault #{shell.set_color(usage.ljust(width), :green)}#{desc}"
         end
       end
 
       shell.say ""
-      say_header.call("SAFE SECRET INPUT  (preferred over passing values as arguments)")
+      shell.say("SAFE SECRET INPUT  (preferred over passing values as arguments)")
       shell.say "  printf '%s' \"$SECRET\" | localvault set KEY --stdin"
       shell.say ""
-      say_header.call("PROJECTS  (dot-notation groups inside one vault)")
+      shell.say("PROJECTS  (dot-notation groups inside one vault)")
       shell.say "  localvault set platepose.API_KEY v    Store a key in the 'platepose' group"
       shell.say "  Filter any command with -p:  show -p platepose, exec -p platepose -- CMD"
       shell.say "  Delete a whole group:        localvault delete 'platepose.*'"
       shell.say ""
-      say_header.call("USING SECRETS WITH ANY CLI")
+      shell.say("USING SECRETS WITH ANY CLI")
       shell.say "  localvault exec -- inventlist ships list"
       shell.say "  localvault exec -- curl -H \"Authorization: Bearer $API_KEY\" ..."
       shell.say ""
@@ -784,6 +784,14 @@ module LocalVault
     require_relative "cli/sync"
     require_relative "cli/guard"
     require_relative "cli/identity_cmd"
+
+    # Thor 1.5 injects a `tree` command into every class. Inside a namespace it
+    # lists under a name that isn't even callable (`identity_command tree`), and
+    # at top level it prints a raw class path as the root. Our grouped help
+    # covers the same ground properly, so drop it everywhere.
+    [self, Guard, Keys, Team, Sync, IdentityCommand].each do |namespace|
+      namespace.remove_command(:tree) if namespace.all_commands.key?("tree")
+    end
 
     register(Guard, "guard", "guard SUBCOMMAND", "Block plaintext secrets in agent tool traffic (Claude Code hooks)")
     register(IdentityCommand, "identity", "identity SUBCOMMAND", "Show or set your local identity (alias, handle, public key)")
