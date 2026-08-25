@@ -19,7 +19,7 @@ brew install inventlist/tap/localvault
 ### Install script (no Homebrew)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/inventlist/localvault/main/install.sh | sh
+curl -sSL https://inventlist.com/tools/localvault/install.sh | sh
 ```
 
 Installs into an isolated prefix (`~/.localvault/runtime`) and writes a wrapper

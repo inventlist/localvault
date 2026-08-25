@@ -3,7 +3,7 @@
 # self-contained wrapper on your PATH. Never touches your project gems, never
 # creates a version-manager shim.
 #
-#   curl -sSL https://raw.githubusercontent.com/inventlist/localvault/main/install.sh | sh
+#   curl -sSL https://inventlist.com/tools/localvault/install.sh | sh
 #
 # Options (env vars):
 #   LOCALVAULT_BIN_DIR   install dir (default: /usr/local/bin if writable, else ~/.local/bin)
