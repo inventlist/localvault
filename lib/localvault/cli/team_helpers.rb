@@ -32,7 +32,11 @@ module LocalVault
         end
 
         passphrase = prompt_passphrase("Passphrase for '#{vault_name}': ")
-        return nil if passphrase.nil? || passphrase.empty?
+        if passphrase.nil? || passphrase.empty?
+          $stderr.puts "Error: Vault '#{vault_name}' is locked and no passphrase was entered."
+          $stderr.puts "Run: localvault unlock #{vault_name}   # caches the passphrase for this session"
+          return nil
+        end
 
         vault = Vault.open(name: vault_name, passphrase: passphrase)
         vault.all # raises Crypto::DecryptionError on wrong passphrase
