@@ -111,18 +111,20 @@ module LocalVault
       default_task :all
 
       desc "push [NAME]", "Push a vault to InventList cloud sync"
+      method_option :vault, type: :string, aliases: "-v", desc: "Vault name (same as NAME)"
       def push(vault_name = nil)
         return unless logged_in?
-        vault_name ||= Config.default_vault
+        vault_name ||= options[:vault] || Config.default_vault
         client = ApiClient.new(token: Config.token)
         perform_push(vault_name, client)
       end
 
       desc "pull [NAME]", "Pull a vault from InventList cloud sync"
       method_option :force, type: :boolean, default: false, desc: "Overwrite existing local vault"
+      method_option :vault, type: :string, aliases: "-v", desc: "Vault name (same as NAME)"
       def pull(vault_name = nil)
         return unless logged_in?
-        vault_name ||= Config.default_vault
+        vault_name ||= options[:vault] || Config.default_vault
         client = ApiClient.new(token: Config.token)
         perform_pull(vault_name, client, force: options[:force])
       end

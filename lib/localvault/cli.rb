@@ -150,27 +150,31 @@ module LocalVault
       rendered = sections.map { |title, names| [title, names.flat_map { |n| help_rows_for(n) }] }
       width = rendered.flat_map { |_, rows| rows.map { |usage, _| usage.length } }.max + 4
 
+      say_header = ->(text) { shell.say shell.set_color(text, :cyan, true) }
+
       shell.say ""
-      shell.say "LocalVault — encrypted local secrets vault with MCP support for AI agents"
+      shell.say shell.set_color("LocalVault", :cyan, true) + " — encrypted local secrets vault with MCP support for AI agents"
       shell.say "  https://inventlist.com/tools/localvault"
 
       rendered.each do |title, rows|
         next if rows.empty?
         shell.say ""
-        shell.say title
-        rows.each { |usage, desc| shell.say "  localvault #{usage.ljust(width)}#{desc}" }
+        say_header.call(title)
+        rows.each do |usage, desc|
+          shell.say "  localvault #{shell.set_color(usage.ljust(width), :green)}#{desc}"
+        end
       end
 
       shell.say ""
-      shell.say "SAFE SECRET INPUT  (preferred over passing values as arguments)"
+      say_header.call("SAFE SECRET INPUT  (preferred over passing values as arguments)")
       shell.say "  printf '%s' \"$SECRET\" | localvault set KEY --stdin"
       shell.say ""
-      shell.say "PROJECTS  (dot-notation groups inside one vault)"
+      say_header.call("PROJECTS  (dot-notation groups inside one vault)")
       shell.say "  localvault set platepose.API_KEY v    Store a key in the 'platepose' group"
       shell.say "  Filter any command with -p:  show -p platepose, exec -p platepose -- CMD"
       shell.say "  Delete a whole group:        localvault delete 'platepose.*'"
       shell.say ""
-      shell.say "USING SECRETS WITH ANY CLI"
+      say_header.call("USING SECRETS WITH ANY CLI")
       shell.say "  localvault exec -- inventlist ships list"
       shell.say "  localvault exec -- curl -H \"Authorization: Bearer $API_KEY\" ..."
       shell.say ""
@@ -316,15 +320,38 @@ module LocalVault
       vault.list.each { |key| $stdout.puts key }
     end
 
-    desc "groups [QUERY]", "List or search stored secret groups without revealing values"
+    desc "groups [QUERY]", "List or search secret groups / projects without revealing values"
     long_desc <<~DESC
-      Discover dot-notation namespaces and flat-key prefix groups.
+      Discover the groups in a vault. "Group" and "project" are the same
+      thing: a named bucket of keys inside one vault. You never create one
+      explicitly — storing a key in it creates it, deleting its last key
+      removes it.
 
-\x05    localvault groups
-\x05    localvault groups str
-\x05    localvault show --group STRIPE
-\x05    localvault set --group STRIPE API_KEY VALUE
+      CREATE by storing keys into a group (three equivalent spellings):
+\x05    localvault set kuickr.API_KEY abc123        # dot-notation
+\x05    localvault set --group kuickr API_KEY abc123
+\x05    localvault set -g kuickr API_KEY abc123
+
+      LIST groups (names and key counts only — values stay hidden):
+\x05    localvault groups                    # all groups in the default vault
+\x05    localvault groups stock              # only groups matching "stock"
+\x05    localvault groups -v intellectaco    # groups in another vault
+
+      WORK WITH one group (any command takes -p / --project):
+\x05    localvault show -p kuickr         # see its keys (masked)
+\x05    localvault list -p kuickr         # just the key names
+\x05    localvault exec -p kuickr -- rails s     # inject only its keys as env vars
+\x05    localvault env -p kuickr          # export only its keys
+\x05    localvault import .env -p kuickr  # import a .env file into the group
+
+      DELETE one key or the whole group:
+\x05    localvault delete kuickr.API_KEY
+\x05    localvault delete 'kuickr.*'
+
+      `localvault projects` is an alias for this command.
     DESC
+    map "projects" => "groups"
+
     def groups(query = nil)
       vault = open_vault!
       matches = GroupCatalog.new(vault.all).search(query)
