@@ -116,7 +116,7 @@ module LocalVault
     # disappearing from help.
     HELP_SECTIONS = [
       ["GETTING STARTED",                                       %w[login config init demo]],
-      ["SECRETS",                                               %w[set get show groups list delete import env exec]],
+      ["SECRETS",                                               %w[set get show reveal groups list delete import env exec]],
       ["VAULT MANAGEMENT",                                      %w[vaults switch rekey unlock lock reset rename copy]],
       ["SYNC  (requires localvault login)",                     %w[sync]],
       ["TEAM SHARING  (requires localvault login)",             %w[dashboard verify add remove team]],
@@ -524,6 +524,29 @@ module LocalVault
       $stdout.puts "export LOCALVAULT_SESSION=\"#{token}\""
     rescue Crypto::DecryptionError
       abort_with "Wrong passphrase for vault '#{vault_name}'"
+    end
+
+    desc "reveal [GROUP]", "Show secrets with values unmasked (same as `show --reveal`)"
+    long_desc <<~DESC
+      Show secrets with their values unmasked. Identical to `show --reveal`, and
+      it takes the same options — `reveal` is simply the verb most people reach
+      for. A bare argument is treated as the group to show.
+
+\x05    localvault reveal                          # every secret, unmasked
+\x05    localvault reveal CLOUDFLARE               # one group
+\x05    localvault reveal --group CLOUDFLARE       # the same thing
+\x05    localvault reveal -p kuickr -v intellectaco
+
+      Plaintext output is still gated: it refuses to print values when stdout is
+      not a terminal, so a redirect or a pipe can't quietly capture secrets.
+    DESC
+    method_option :group, aliases: "-g", type: :string, lazy_default: GROUP_ALL_SENTINEL, desc: "Show all groups or one group by name"
+    method_option :project, aliases: "-p", type: :string, desc: "Show only this project group"
+    def reveal(group = nil)
+      merged = options.merge("reveal" => true)
+      merged["group"] = group if group && merged["project"].nil?
+      self.options = merged
+      show
     end
 
     desc "show", "Display secrets in a formatted table (masked by default)"
