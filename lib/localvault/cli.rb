@@ -116,7 +116,7 @@ module LocalVault
     # disappearing from help.
     HELP_SECTIONS = [
       ["GETTING STARTED",                                       %w[login config init demo]],
-      ["SECRETS",                                               %w[set get show reveal groups list delete import env exec]],
+      ["SECRETS",                                               %w[set get show reveal groups list delete import env exec rails]],
       ["VAULT MANAGEMENT",                                      %w[vaults switch rekey unlock lock reset rename copy]],
       ["SYNC  (requires localvault login)",                     %w[sync]],
       ["TEAM SHARING  (requires localvault login)",             %w[dashboard verify add remove team]],
@@ -807,6 +807,7 @@ module LocalVault
     require_relative "cli/sync"
     require_relative "cli/guard"
     require_relative "cli/identity_cmd"
+    require_relative "cli/rails_import"
 
     # Thor 1.5 injects a `tree` command into every class. Inside a namespace it
     # lists under a name that isn't even callable (`identity_command tree`), and
@@ -1647,6 +1648,67 @@ module LocalVault
         $stdout.puts "  which -a localvault"
         CommandStatus.error
       end
+    end
+
+    desc "rails", "Import a Rails app's credentials keys into the vault"
+    long_desc <<~DESC
+      Store this Rails app's credentials keys in the vault so you can run it
+      with no key file on disk. Rails reads ENV["RAILS_MASTER_KEY"] whenever
+      config/master.key is absent, so injecting that one variable is enough.
+
+\x05    localvault rails                  # import config/master.key (and per-env keys)
+\x05    localvault rails --check          # show what would be imported
+
+      Then run your app with the key injected, never written anywhere:
+
+\x05    localvault exec --profile rails -- bin/rails server
+\x05    localvault exec --profile rails -- bin/rails credentials:edit
+
+      For a per-environment key (config/credentials/production.key), map it —
+      Rails reads no variable other than RAILS_MASTER_KEY:
+
+\x05    localvault exec --map rails.production_key=RAILS_MASTER_KEY -- bin/rails console
+
+      Key files are left exactly as they are. Deleting them is your call.
+    DESC
+    method_option :check, type: :boolean, default: false, desc: "List what would be imported without writing"
+    def rails
+      importer = RailsImport.new
+      unless importer.rails_app?
+        abort_with "No Rails app here — expected config/credentials.yml.enc or config/master.key in #{Dir.pwd}"
+        return CommandStatus.error
+      end
+
+      keys = importer.keys
+      if keys.empty?
+        $stdout.puts "No credentials key files found (config/master.key, config/credentials/*.key)."
+        $stdout.puts "Nothing to import — the app may already run from RAILS_MASTER_KEY."
+        return CommandStatus.ok
+      end
+
+      if options[:check]
+        $stdout.puts "Would import into vault '#{options[:vault] || Config.default_vault}':"
+        keys.each { |key| $stdout.puts "  #{key.path}  ->  #{key.vault_key}" }
+        return CommandStatus.ok
+      end
+
+      vault = open_vault!
+      keys.each do |key|
+        vault.set(key.vault_key, key.value)
+        $stdout.puts "Imported #{key.path} -> #{key.vault_key}"
+      end
+
+      $stdout.puts
+      $stdout.puts "Run without a key file on disk:"
+      $stdout.puts "  localvault exec --profile rails -- bin/rails server"
+      keys.select(&:environment).each do |key|
+        $stdout.puts "  localvault exec --map #{key.vault_key}=RAILS_MASTER_KEY -- bin/rails console  # #{key.environment}"
+      end
+
+      $stdout.puts
+      $stdout.puts "Note: the key files are still on disk (#{keys.map(&:path).join(", ")})."
+      $stdout.puts "They keep working until you remove them — that's your call, not ours."
+      CommandStatus.ok
     end
 
     desc "upgrade", "Upgrade localvault using whichever method installed it"

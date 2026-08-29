@@ -17,8 +17,23 @@ module LocalVault
           "AWS_IAM.secret_access_key" => "AWS_SECRET_ACCESS_KEY",
           "AWS_IAM.session_token" => "AWS_SESSION_TOKEN"
         }
+      },
+      # Rails reads its credentials key from ENV["RAILS_MASTER_KEY"] when
+      # config/master.key is absent (railties: encrypted(..., env_key:
+      # "RAILS_MASTER_KEY")), so injecting that one variable is enough to run a
+      # Rails app with no key file on disk.
+      "rails" => {
+        only: ["rails.*"],
+        map: { "rails.master_key" => "RAILS_MASTER_KEY" }
       }
     }.freeze
+
+    # Per-environment credentials (config/credentials/production.key) still have
+    # to arrive as RAILS_MASTER_KEY — Rails reads no other variable. This builds
+    # the mapping for one environment.
+    def self.rails_environment_mapping(environment)
+      { "rails.#{environment}_key" => "RAILS_MASTER_KEY" }
+    end
 
     def self.entries(secrets, project: nil, only: nil, except: nil, map: nil, profile: nil, on_skip: nil)
       profile_config = profile_config(profile)

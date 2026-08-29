@@ -4,7 +4,7 @@ module LocalVault
 
     SEGMENT_PATTERN = /\A[A-Za-z_][A-Za-z0-9_]*\z/
     VAULT_PATTERN = /\A[A-Za-z0-9][A-Za-z0-9_-]{0,63}\z/
-    PROFILES = %w[aws].freeze
+    PROFILES = %w[aws rails].freeze
 
     module_function
 
