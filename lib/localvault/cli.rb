@@ -123,7 +123,7 @@ module LocalVault
       ["KEYS  (X25519 identity for vault sharing)",             %w[keys identity]],
       ["AI / MCP",                                              %w[install-mcp mcp guard]],
       ["LEGACY SHARING  (pre-v1.2 direct share, still works)",  %w[keygen share receive revoke]],
-      ["OTHER",                                                 %w[logout version doctor help]]
+      ["OTHER",                                                 %w[logout version doctor upgrade help]]
     ].freeze
 
     # One row per plain command; registered subcommands (sync, team, keys,
@@ -1649,6 +1649,60 @@ module LocalVault
       end
     end
 
+    desc "upgrade", "Upgrade localvault using whichever method installed it"
+    long_desc <<~DESC
+      Detect how this copy of localvault was installed and run the matching
+      upgrade — Homebrew, RubyGems, or the install script.
+
+\x05    localvault upgrade            # detect and upgrade
+\x05    localvault upgrade --check    # show what would run, change nothing
+
+      If more than one localvault is on PATH, an old copy can shadow the new one
+      and the upgrade looks like it did nothing. This refuses to guess in that
+      case and points you at `localvault doctor`.
+    DESC
+    method_option :check, type: :boolean, default: false, desc: "Print the upgrade command without running it"
+    def upgrade
+      paths = localvault_paths
+      if paths.length > 1
+        $stderr.puts "Error: multiple localvault executables are on PATH:"
+        paths.each_with_index { |path, index| $stderr.puts "  #{index + 1}. #{path}" }
+        $stderr.puts "\nUpgrading now would leave a stale copy shadowing the new one."
+        $stderr.puts "Run `localvault doctor`, remove the copies you don't want, then retry."
+        return CommandStatus.error
+      end
+
+      method, command = upgrade_method_for(paths.first)
+      if method == :unknown
+        $stderr.puts "Error: cannot tell how localvault was installed#{" (#{paths.first})" if paths.first}."
+        $stderr.puts "Upgrade with whichever you used:"
+        $stderr.puts "  brew upgrade inventlist/tap/localvault"
+        $stderr.puts "  gem update localvault"
+        $stderr.puts "  curl -sSL https://inventlist.com/tools/localvault/install.sh | sh"
+        return CommandStatus.error
+      end
+
+      $stdout.puts "Installed via #{method} (#{paths.first})"
+      $stdout.puts "Current version: #{VERSION}"
+      $stdout.puts "Command: #{command}"
+
+      if options[:check]
+        $stdout.puts "\n--check: nothing was run."
+        return CommandStatus.ok
+      end
+
+      $stdout.puts
+      unless system(command)
+        $stderr.puts "\nError: upgrade command failed. Run it yourself to see the full output:"
+        $stderr.puts "  #{command}"
+        return CommandStatus.error
+      end
+
+      $stdout.puts
+      $stdout.puts "Done. Verify with: localvault version"
+      CommandStatus.ok
+    end
+
     def self.exit_on_failure?
       false
     end
@@ -2167,6 +2221,38 @@ module LocalVault
 
       def homebrew_localvault_path?(path)
         path.start_with?("/opt/homebrew/bin/", "/usr/local/bin/")
+      end
+
+      # Which installer put this executable here, and how to upgrade it.
+      #
+      # The path alone can't decide: Homebrew and install.sh both land in
+      # /usr/local/bin. Both write a wrapper naming their gem prefix, so read
+      # that instead — a Cellar path means brew, ~/.localvault/runtime means the
+      # install script.
+      UPGRADE_COMMANDS = {
+        brew:   "brew upgrade inventlist/tap/localvault",
+        gem:    "gem update localvault",
+        script: "curl -sSL https://inventlist.com/tools/localvault/install.sh | sh"
+      }.freeze
+
+      def upgrade_method_for(path)
+        method = detect_install_method(path)
+        [method, UPGRADE_COMMANDS[method]]
+      end
+
+      def detect_install_method(path)
+        return :unknown if path.nil?
+        return :brew if File.symlink?(path) && File.readlink(path).include?("/Cellar/")
+
+        wrapper = File.read(path, 2048)
+        return :brew if wrapper.include?("/Cellar/")
+        return :script if wrapper.include?("/.localvault/runtime")
+        return :gem if path.include?("/shims/") || path.include?("/gems/")
+
+        :unknown
+      rescue SystemCallError, ArgumentError
+        # Binary or unreadable: fall back to the one thing the path does tell us.
+        path.include?("/shims/") || path.include?("/gems/") ? :gem : :unknown
       end
 
       def cursor_settings_path
