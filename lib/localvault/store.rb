@@ -188,13 +188,40 @@ module LocalVault
     # List all vault names found on disk.
     #
     # @return [Array<String>] sorted vault names
+    # Names of the vaults on disk: directories under +vaults/+ that have a
+    # valid vault name and a +meta.yml+. Anything else (a stray file, a
+    # hand-made folder with spaces in its name, a half-deleted vault) is
+    # skipped so callers can always +Store.new+ what they get back; see
+    # +stray_entries+ to surface those.
+    #
+    # @return [Array<String>] sorted vault names
     def self.list_vaults
       vaults_dir = Config.vaults_path
       return [] unless File.directory?(vaults_dir)
 
       Dir.children(vaults_dir)
-        .select { |name| File.directory?(File.join(vaults_dir, name)) }
+        .select { |name| vault_dir?(vaults_dir, name) }
         .sort
     end
+
+    # Entries under +vaults/+ that +list_vaults+ ignores, so a listing can
+    # tell the user why a folder they can see is not a vault.
+    #
+    # @return [Array<String>] sorted entry names
+    def self.stray_entries
+      vaults_dir = Config.vaults_path
+      return [] unless File.directory?(vaults_dir)
+
+      Dir.children(vaults_dir)
+        .reject { |name| name.start_with?(".") || vault_dir?(vaults_dir, name) }
+        .sort
+    end
+
+    def self.vault_dir?(vaults_dir, name)
+      name.match?(VAULT_NAME_PATTERN) && name.length <= 64 &&
+        File.directory?(File.join(vaults_dir, name)) &&
+        File.exist?(File.join(vaults_dir, name, "meta.yml"))
+    end
+    private_class_method :vault_dir?
   end
 end

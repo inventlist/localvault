@@ -501,6 +501,12 @@ module LocalVault
         .render
 
       $stdout.puts table
+
+      strays = Store.stray_entries
+      unless strays.empty?
+        $stderr.puts "Ignored #{strays.size} non-vault entr#{strays.size == 1 ? "y" : "ies"} in #{Config.vaults_path}: #{strays.map { |s| "'#{s}'" }.join(", ")}"
+        $stderr.puts "A vault is a folder named [a-z0-9_-] with a meta.yml inside."
+      end
     end
 
     desc "unlock [VAULT]", "Cache passphrase for session and output session token"

@@ -601,6 +601,15 @@ class CLITest < Minitest::Test
     assert_includes out, "staging"
   end
 
+  def test_vaults_survives_non_vault_directory
+    create_test_vault("ok")
+    FileUtils.mkdir_p(File.join(LocalVault::Config.vaults_path, "Bad Name!"))
+    out, err = capture_io { LocalVault::CLI.start(%w[vaults]) }
+    assert_match(/ok/, out)
+    refute_match(/Bad Name/, out)
+    assert_match(/Ignored 1 non-vault entry.*'Bad Name!'/, err)
+  end
+
   def test_vaults_marks_default_vault
     create_test_vault("default")
     create_test_vault("staging")

@@ -94,4 +94,17 @@ class StoreTest < Minitest::Test
 
     assert_equal %w[alpha beta gamma], LocalVault::Store.list_vaults
   end
+
+  def test_list_vaults_ignores_non_vault_entries
+    LocalVault::Store.new("ok").create!(salt: @salt)
+    vaults_dir = LocalVault::Config.vaults_path
+    FileUtils.mkdir_p(File.join(vaults_dir, "Bad Name!"))   # invalid name
+    FileUtils.mkdir_p(File.join(vaults_dir, "no-meta"))     # valid name, not a vault
+    FileUtils.mkdir_p(File.join(vaults_dir, ".hidden"))
+    File.write(File.join(vaults_dir, "stray.txt"), "")
+
+    assert_equal %w[ok], LocalVault::Store.list_vaults
+    assert_equal ["Bad Name!", "no-meta", "stray.txt"], LocalVault::Store.stray_entries
+    LocalVault::Store.list_vaults.each { |n| LocalVault::Store.new(n) } # never raises
+  end
 end
