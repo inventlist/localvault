@@ -90,9 +90,11 @@ The `keys` namespace manages your X25519 keypair. `localvault login` auto-genera
 | `localvault sync push [NAME]` | Push one vault to cloud |
 | `localvault sync pull [NAME]` | Pull one vault from cloud (auto-unlocks if you have a key slot) |
 | `localvault sync pull [NAME] --force` | Overwrite existing local vault |
+| `localvault sync diff [NAME]` | Show which keys differ between local and cloud (names only, never values) |
+| `localvault sync merge [NAME]` | Three-way merge local and cloud key by key, then push. `--prefer local\|remote`, `--local KEY`, `--remote KEY`, `--dry-run`, `--no-push` |
 | `localvault sync status` | Show local/remote status for all vaults |
 
-`localvault sync` uses per-vault `.sync_state` files to track what was last synced. If a vault exists on both sides with no baseline yet but the secrets are byte-identical (e.g. it was pushed before sync tracking existed), it records a baseline automatically — action `adopt`, reason "in sync — recording baseline" — and moves no data. CONFLICT is reserved for genuinely diverged state: both sides changed since the last sync, or both exist with no baseline and the secrets differ. On a conflict it prints how to resolve (keep local or keep remote) and never silently overwrites either side. The summary line can include a `N baselined` count for adopted vaults.
+`localvault sync` uses per-vault `.sync_state` files to track what was last synced. If a vault exists on both sides with no baseline yet but the secrets are byte-identical (e.g. it was pushed before sync tracking existed), it records a baseline automatically — action `adopt`, reason "in sync — recording baseline" — and moves no data. CONFLICT is reserved for genuinely diverged state: both sides changed since the last sync, or both exist with no baseline and the secrets differ. On a conflict it lists the differing keys (names only, never values) and prints how to resolve: `sync merge` for a key-by-key three-way merge, or keep one side with `sync push` / `sync pull --force`. It never silently overwrites either side. The summary line can include a `N baselined` count for adopted vaults.
 
 ## Team sharing
 

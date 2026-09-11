@@ -91,7 +91,7 @@ localvault sync push production
 localvault sync pull production
 ```
 
-The per-vault `sync push`/`pull` commands are last-write-wins — they do exactly what you tell them. The bare `localvault sync`, though, tracks a per-vault baseline: it pushes only when local changed, pulls only when remote changed, records a baseline automatically when both sides are already identical, and stops with a CONFLICT if both sides diverged so nothing is silently overwritten. For solo use across machines, run `localvault sync` and let it pick the direction.
+The per-vault `sync push`/`pull` commands are last-write-wins — they do exactly what you tell them. The bare `localvault sync`, though, tracks a per-vault baseline: it pushes only when local changed, pulls only when remote changed, records a baseline automatically when both sides are already identical, and stops with a CONFLICT if both sides diverged so nothing is silently overwritten. A conflict shows which keys differ (never values) and `localvault sync merge` combines both sides key by key. For solo use across machines, run `localvault sync` and let it pick the direction.
 
 ## Personal Sync vs Team Sync
 

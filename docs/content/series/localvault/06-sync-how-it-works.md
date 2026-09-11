@@ -45,7 +45,20 @@ For each vault it compares local and remote and picks a direction:
 - **push** / **pull** — only one side changed since the last sync, so the direction is unambiguous.
 - **skip** — nothing changed on either side.
 - **adopt** — both sides already hold identical secrets but there was no sync baseline yet (e.g. a vault pushed before sync tracking existed); LocalVault records a baseline so future syncs can detect drift. No data moves.
-- **CONFLICT** — both sides changed independently, or both exist with no baseline and the secrets genuinely differ. LocalVault never overwrites either side here; resolve it explicitly with `sync push <vault>` (keep local) or `sync pull <vault> --force` (keep remote).
+- **CONFLICT** — both sides changed independently, or both exist with no baseline and the secrets genuinely differ. LocalVault never overwrites either side here. It lists which keys differ (names only, never values) and the commands that resolve it.
+
+### Resolving a conflict
+
+Since 1.15.0 every push and pull records an encrypted snapshot of the last-synced state, so LocalVault can run a three-way merge per key:
+
+```bash
+localvault sync diff notes                  # which keys changed on which side, no values
+localvault sync merge notes                 # keeps every one-sided change from both machines, then pushes
+localvault sync merge notes --prefer remote # keys edited differently on both sides: take the cloud
+localvault sync merge notes --local API_KEY --remote DB_URL   # or decide per key
+```
+
+A key edited on one side only applies automatically. A key edited differently on both sides, or deleted on one side and edited on the other, needs a choice. `--dry-run` shows the plan and `--no-push` keeps the merge local. `sync push <vault>` (keep local) and `sync pull <vault> --force` (keep remote) still take one side wholesale. On team vaults only the owner can merge.
 
 The summary line reports the counts, e.g. `Summary: 1 pushed, 1 pulled, 1 baselined, 1 up to date`.
 
