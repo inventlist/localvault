@@ -125,6 +125,8 @@ localvault exec -- rails server
 | `sync --dry-run` | Preview what sync would do without making changes |
 | `sync push [NAME]` | Push one vault to cloud |
 | `sync pull [NAME]` | Pull one vault from cloud (auto-unlocks if you have a key slot) |
+| `sync diff [NAME]` | Show which keys differ between local and cloud (names only, never values) |
+| `sync merge [NAME]` | Three-way merge local and cloud key by key, then push (`--prefer local\|remote`, `--local KEY`, `--remote KEY`) |
 | `sync status` | Show sync state for all vaults |
 
 ### Team Sharing (v1.3.0)
@@ -200,6 +202,30 @@ localvault sync --dry-run
 #   production    push      local changes
 #   staging       pull      remote changes
 ```
+
+### Resolving a conflict
+
+When a vault changed on both machines since the last sync, `sync` stops and
+shows which keys differ. Values are never printed.
+
+```bash
+localvault sync
+#   devops  CONFLICT  both local and remote changed since last sync
+#     cloud     added                  REMOTE_ONLY  will take cloud
+#     local     added                  LOCAL_ONLY   will keep local
+#     CONFLICT  changed on both sides  SHARED       needs a choice
+
+localvault sync merge devops                    # clean merge: keeps every change from both sides
+localvault sync merge devops --prefer remote    # conflicting keys: take cloud
+localvault sync merge devops --local SHARED     # or decide per key (--local / --remote, repeatable)
+localvault sync diff devops                     # just look, change nothing
+```
+
+The merge is three-way: each sync records an encrypted snapshot of the
+last-synced state, so a key edited on only one side applies automatically and
+only keys edited differently on both sides need a choice. Deleting a key on one
+side while the other side edits it is also a conflict. `sync push` and
+`sync pull --force` still take one side wholesale.
 
 ## Team Sharing
 

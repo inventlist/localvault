@@ -15,6 +15,7 @@ require_relative "localvault/key_slot"
 require_relative "localvault/api_client"
 require_relative "localvault/sync_bundle"
 require_relative "localvault/sync_state"
+require_relative "localvault/sync_merge"
 
 module LocalVault
 end

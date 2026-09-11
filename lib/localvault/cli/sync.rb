@@ -1,10 +1,14 @@
 require "thor"
 require "fileutils"
 require "digest"
+require "io/console"
+require_relative "team_helpers"
 
 module LocalVault
   class CLI
     class Sync < Thor
+      include LocalVault::CLI::TeamHelpers
+
       desc "all", "Sync all vaults bidirectionally (push local changes, pull remote changes)"
       method_option :dry_run, type: :boolean, default: false, desc: "Show what would happen without making changes"
       # Smart bidirectional sync for all vaults.
@@ -18,7 +22,7 @@ module LocalVault
       # - Both exist, only remote changed → pull
       # - Both exist, neither changed → skip
       # - Both exist, no baseline but secrets identical → adopt (record baseline)
-      # - Both exist, both changed → CONFLICT (manual resolution)
+      # - Both exist, both changed → CONFLICT (resolve with sync merge / push / pull --force)
       # - Shared vault (not owned by you) → pull-only
       def all
         return unless logged_in?
@@ -94,14 +98,20 @@ module LocalVault
         parts << "#{conflicts} conflict#{conflicts == 1 ? "" : "s"}" if conflicts > 0
         $stdout.puts "Summary: #{parts.join(", ")}"
 
-        # Conflict guidance
+        # Conflict guidance — key names only, never values
         if conflicts > 0
           $stdout.puts
           plan.select { |p| p[:action] == :conflict }.each do |p|
             $stderr.puts "  #{p[:name]} — #{p[:reason]}"
-            $stderr.puts "    Resolve with:"
-            $stderr.puts "      localvault sync push #{p[:name]}   (keep local, overwrite remote)"
-            $stderr.puts "      localvault sync pull #{p[:name]} --force  (keep remote, overwrite local)"
+            result = quiet_merge_preview(p[:name], client)
+            if result
+              print_merge_report(result, indent: "    ", io: $stderr)
+              print_resolution_help(p[:name], result, io: $stderr)
+            else
+              $stderr.puts "    See which keys differ (no values shown):"
+              $stderr.puts "      localvault sync diff #{p[:name]}"
+              print_resolution_help(p[:name], nil, io: $stderr)
+            end
           end
         end
       rescue ApiClient::ApiError => e
@@ -127,6 +137,98 @@ module LocalVault
         vault_name ||= options[:vault] || Config.default_vault
         client = ApiClient.new(token: Config.token)
         perform_pull(vault_name, client, force: options[:force])
+      end
+
+      desc "diff [NAME]", "Show which keys differ between local and cloud (names only, no values)"
+      method_option :vault, type: :string, aliases: "-v", desc: "Vault name (same as NAME)"
+      def diff(vault_name = nil)
+        return unless logged_in?
+        vault_name ||= options[:vault] || Config.default_vault
+        client = ApiClient.new(token: Config.token)
+
+        result = build_merge(vault_name, client)
+        return false unless result
+
+        if result.local_changes.empty? && result.remote_changes.empty? &&
+           result.same_changes.empty? && result.conflicts.empty?
+          $stdout.puts "#{vault_name}: local and cloud hold the same secrets."
+          return true
+        end
+
+        $stdout.puts "#{vault_name} — three-way diff against last sync (values never shown)"
+        print_merge_report(result, indent: "  ", io: $stdout)
+        $stdout.puts
+        print_resolution_help(vault_name, result, io: $stdout)
+        true
+      rescue ApiClient::ApiError => e
+        $stderr.puts "Error: #{e.message}"
+        false
+      end
+
+      desc "merge [NAME]", "Three-way merge local and cloud, then push the result"
+      method_option :vault,   type: :string,  aliases: "-v", desc: "Vault name (same as NAME)"
+      method_option :prefer,  type: :string,  enum: %w[local remote], desc: "Resolve every conflicting key from this side"
+      method_option :local,   type: :array,   default: [], desc: "Keys to keep from local (repeatable)"
+      method_option :remote,  type: :array,   default: [], desc: "Keys to take from cloud (repeatable)"
+      method_option :dry_run, type: :boolean, default: false, desc: "Show the merge plan without writing or pushing"
+      method_option :push,    type: :boolean, default: true, desc: "Push after merging (--no-push keeps it local)"
+      # Merge cloud changes into the local vault key by key using the
+      # ancestor snapshot recorded at the last sync. Non-conflicting changes
+      # from both sides apply automatically; a key changed differently on
+      # both sides needs +--prefer+ or a per-key +--local+/+--remote+ pick.
+      def merge(vault_name = nil)
+        return unless logged_in?
+        vault_name ||= options[:vault] || Config.default_vault
+        client = ApiClient.new(token: Config.token)
+
+        both = options[:local] & options[:remote]
+        unless both.empty?
+          $stderr.puts "Error: #{both.join(", ")} given to both --local and --remote. Pick one side per key."
+          return false
+        end
+        picks = {}
+        options[:local].each  { |k| picks[k] = :local }
+        options[:remote].each { |k| picks[k] = :remote }
+        prefer = options[:prefer]&.to_sym
+
+        result = build_merge(vault_name, client, prefer: prefer, picks: picks)
+        return false unless result
+
+        unknown = picks.keys - result.conflict_keys_before_picks
+        unless unknown.empty?
+          $stderr.puts "Warning: #{unknown.join(", ")} #{unknown.size == 1 ? "is" : "are"} not in conflict — ignored."
+        end
+
+        $stdout.puts "#{vault_name} — merge plan (values never shown)"
+        print_merge_report(result, indent: "  ", io: $stdout)
+
+        unless result.clean?
+          $stdout.puts
+          $stderr.puts "Error: #{result.conflicts.size} key#{result.conflicts.size == 1 ? "" : "s"} changed on both sides. Choose a side:"
+          print_resolution_help(vault_name, result, io: $stderr, merge_only: true)
+          return false
+        end
+
+        if options[:dry_run]
+          $stdout.puts
+          $stdout.puts "Dry run — no changes made."
+          return true
+        end
+
+        master_key = @merge_master_key
+        vault = Vault.new(name: vault_name, master_key: master_key)
+        vault.replace(result.merged)
+        $stdout.puts "  merged #{vault_name} locally"
+
+        unless options[:push]
+          $stdout.puts "  not pushed (--no-push). Push later with: localvault sync push #{vault_name}"
+          return true
+        end
+
+        perform_push(vault_name, client)
+      rescue ApiClient::ApiError => e
+        $stderr.puts "Error: #{e.message}"
+        false
       end
 
       desc "status", "Show sync status for all vaults"
@@ -217,6 +319,8 @@ module LocalVault
           end
 
           key_slots = bootstrap_owner_slot(key_slots, store)
+          key_slots = refresh_scoped_slots(key_slots, store)
+          return false unless key_slots
           blob = SyncBundle.pack_v3(store, owner: owner, key_slots: key_slots)
         else
           blob = SyncBundle.pack(store)
@@ -224,11 +328,8 @@ module LocalVault
 
         client.push_vault(vault_name, blob)
 
-        # Record sync state
-        SyncState.new(vault_name).write!(
-          checksum: SyncState.local_checksum(store),
-          direction: "push"
-        )
+        # Record sync state + ancestor snapshot for future merges
+        SyncState.new(vault_name).record!(store, direction: "push")
 
         $stdout.puts "  pushed #{vault_name} (#{blob.bytesize} bytes)"
         true
@@ -266,11 +367,8 @@ module LocalVault
           store.write_encrypted(data[:secrets])
         end
 
-        # Record sync state
-        SyncState.new(vault_name).write!(
-          checksum: SyncState.local_checksum(store),
-          direction: "pull"
-        )
+        # Record sync state + ancestor snapshot for future merges
+        SyncState.new(vault_name).record!(store, direction: "pull")
 
         $stdout.puts "  pulled #{vault_name}"
 
@@ -401,10 +499,7 @@ module LocalVault
       # @return [Boolean] true on success, false on any error
       def perform_adopt(vault_name)
         store = Store.new(vault_name)
-        SyncState.new(vault_name).write!(
-          checksum: SyncState.local_checksum(store),
-          direction: "adopt"
-        )
+        SyncState.new(vault_name).record!(store, direction: "adopt")
         $stdout.puts "  baselined #{vault_name} (already in sync)"
         true
       rescue StandardError => e
@@ -462,6 +557,161 @@ module LocalVault
         false
       end
 
+      # ── Merge helpers ────────────────────────────────────────────
+
+      # Decrypt base / local / remote and run the three-way merge. Prompts
+      # for the passphrase when the vault isn't unlocked. Returns nil (after
+      # printing the reason) when anything needed is missing.
+      #
+      # @return [SyncMerge::Result, nil]
+      def build_merge(vault_name, client, prefer: nil, picks: {})
+        store = Store.new(vault_name)
+        unless store.exists?
+          $stderr.puts "Error: Vault '#{vault_name}' does not exist locally. Use: localvault sync pull #{vault_name}"
+          return nil
+        end
+
+        master_key = ensure_master_key(vault_name)
+        return nil unless master_key
+        @merge_master_key = master_key
+
+        blob = client.pull_vault(vault_name)
+        unless blob.is_a?(String) && !blob.empty?
+          $stderr.puts "Error: Vault '#{vault_name}' has no cloud copy. Use: localvault sync push #{vault_name}"
+          return nil
+        end
+        data = SyncBundle.unpack(blob, expected_name: vault_name)
+
+        # Team vaults: only the owner holds the full plaintext and may push, so
+        # only the owner can merge. Members take the cloud copy instead.
+        handle = Config.inventlist_handle
+        if data[:owner] && data[:owner] != handle
+          my_slot = (data[:key_slots] || {})[handle]
+          access  = my_slot.is_a?(Hash) && my_slot["scopes"].is_a?(Array) ? "scoped" : "member"
+          $stderr.puts "Error: '#{vault_name}' is a team vault owned by @#{data[:owner]}; you have #{access} access."
+          $stderr.puts "Only the owner can merge or push. Take the cloud copy with:"
+          $stderr.puts "  localvault sync pull #{vault_name} --force"
+          return nil
+        end
+
+        merge_secrets(vault_name, store, master_key, data[:secrets], prefer: prefer, picks: picks)
+      rescue SyncBundle::UnpackError => e
+        $stderr.puts "Error: Could not parse cloud bundle for '#{vault_name}': #{e.message}"
+        nil
+      rescue Crypto::DecryptionError
+        $stderr.puts "Error: The cloud copy of '#{vault_name}' is encrypted with a different key (rekeyed or rotated elsewhere)."
+        $stderr.puts "Merge is not possible. Take one side:"
+        print_resolution_help(vault_name, nil, io: $stderr)
+        nil
+      rescue ApiClient::ApiError => e
+        if e.status == 404
+          $stderr.puts "Error: Vault '#{vault_name}' not found in cloud. Use: localvault sync push #{vault_name}"
+          nil
+        else
+          raise
+        end
+      end
+
+      # Same as +build_merge+ but never prompts and never prints — used by
+      # +sync all+ to enrich conflict output when the key is already cached.
+      #
+      # @return [SyncMerge::Result, nil]
+      def quiet_merge_preview(vault_name, client)
+        master_key = SessionCache.get(vault_name)
+        return nil unless master_key
+        store = Store.new(vault_name)
+        blob  = client.pull_vault(vault_name)
+        return nil unless blob.is_a?(String) && !blob.empty?
+        remote_bytes = SyncBundle.unpack(blob)[:secrets]
+        merge_secrets(vault_name, store, master_key, remote_bytes)
+      rescue ApiClient::ApiError, SyncBundle::UnpackError, Crypto::DecryptionError,
+             SyncMerge::StructureError, JSON::ParserError
+        nil
+      end
+
+      def merge_secrets(vault_name, store, master_key, remote_bytes, prefer: nil, picks: {})
+        base_bytes = SyncState.new(vault_name).read_base
+        base   = base_bytes ? decrypt_secrets(base_bytes, master_key) : nil
+        local  = decrypt_secrets(store.read_encrypted, master_key)
+        remote = decrypt_secrets(remote_bytes, master_key)
+        result = SyncMerge.merge(base, local, remote, prefer: prefer, picks: picks)
+        # Remember what needed a choice before picks so the CLI can validate them.
+        unresolved = (prefer || !picks.empty?) ? SyncMerge.merge(base, local, remote) : result
+        result.conflict_keys_before_picks = unresolved.conflicts.map(&:key)
+        result
+      rescue JSON::ParserError
+        # Never echo the parser's excerpt: it would contain decrypted bytes.
+        $stderr.puts "Error: decrypted secrets for '#{vault_name}' are not valid JSON (corrupt vault data). Merge aborted."
+        nil
+      rescue SyncMerge::StructureError => e
+        $stderr.puts "Error: cannot merge '#{vault_name}': #{e.message}."
+        $stderr.puts "Rename one of them on one side, or take a whole side:"
+        print_resolution_help(vault_name, nil, io: $stderr)
+        nil
+      end
+
+      def decrypt_secrets(bytes, master_key)
+        return {} if bytes.nil? || bytes.empty?
+        JSON.parse(Crypto.decrypt(bytes, master_key))
+      end
+
+      # Print the key-level report. Only key names and change kinds appear.
+      def print_merge_report(result, indent:, io:)
+        lines = []
+        result.remote_changes.each { |c| lines << ["cloud",    c.kind.to_s, c.key, "will take cloud"] }
+        result.local_changes.each  { |c| lines << ["local",    c.kind.to_s, c.key, "will keep local"] }
+        result.same_changes.each   { |c| lines << ["both",     c.kind.to_s, c.key, "identical, keep"] }
+        result.conflicts.each      { |c| lines << ["CONFLICT", conflict_label(c.kind), c.key, "needs a choice"] }
+
+        if lines.empty?
+          io.puts "#{indent}no key differences"
+          return
+        end
+
+        w0 = lines.map { |l| l[0].length }.max
+        w1 = lines.map { |l| l[1].length }.max
+        w2 = lines.map { |l| l[2].length }.max
+        lines.each do |side, kind, key, note|
+          io.puts "#{indent}#{side.ljust(w0)}  #{kind.ljust(w1)}  #{key.ljust(w2)}  #{note}"
+        end
+      end
+
+      def conflict_label(kind)
+        case kind
+        when :local_deleted  then "deleted here, changed in cloud"
+        when :remote_deleted then "changed here, deleted in cloud"
+        when :structure      then "secret vs group, differs per side"
+        else                      "changed on both sides"
+        end
+      end
+
+      # Print the exact commands that resolve this vault's state.
+      def print_resolution_help(vault_name, result, io:, merge_only: false)
+        if result.nil? || result.clean?
+          io.puts "    Merge (keeps every change from both sides):" unless merge_only
+          io.puts "      localvault sync merge #{vault_name}"
+        else
+          keys = result.conflicts.map(&:key)
+          io.puts "    Merge, choosing a side for the conflicting key#{keys.size == 1 ? "" : "s"}:"
+          io.puts "      localvault sync merge #{vault_name} --prefer local"
+          io.puts "      localvault sync merge #{vault_name} --prefer remote"
+          io.puts "    Or pick per key:"
+          example = keys.size == 1 ? "--local #{keys.first}" : "--local #{keys.first} --remote #{keys[1]}"
+          io.puts "      localvault sync merge #{vault_name} #{example}"
+        end
+        return if merge_only
+        io.puts "    Or take one side entirely:"
+        io.puts "      localvault sync push #{vault_name}          (keep local, overwrite cloud)"
+        io.puts "      localvault sync pull #{vault_name} --force  (keep cloud, overwrite local)"
+      end
+
+      def prompt_passphrase(msg = "Passphrase: ")
+        IO.console&.getpass(msg) || $stdin.gets&.chomp || ""
+      rescue Interrupt
+        $stderr.puts
+        ""
+      end
+
       def logged_in?
         return true if Config.token
 
@@ -495,6 +745,45 @@ module LocalVault
         data[:key_slots] || {}
       rescue ApiClient::ApiError, SyncBundle::UnpackError
         {}
+      end
+
+      # Scoped members read a per-member blob, not the vault ciphertext, so a
+      # push must rebuild those blobs from the current plaintext or members
+      # keep seeing the pre-push values. Needs the master key; when the vault
+      # is locked the push is refused rather than publishing inconsistent
+      # views. Returns nil when the push must not proceed.
+      #
+      # @return [Hash, nil] refreshed key slots, or nil to abort the push
+      def refresh_scoped_slots(key_slots, store)
+        scoped = key_slots.select { |_, s| s.is_a?(Hash) && s["scopes"].is_a?(Array) && s["pub"].is_a?(String) }
+        return key_slots if scoped.empty?
+
+        master_key = SessionCache.get(store.vault_name)
+        unless master_key
+          $stderr.puts "Error: '#{store.vault_name}' has scoped members whose copies must be rebuilt on push, but the vault is locked."
+          $stderr.puts "Run: localvault unlock #{store.vault_name} && localvault sync push #{store.vault_name}"
+          return nil
+        end
+
+        vault   = Vault.new(name: store.vault_name, master_key: master_key)
+        secrets = vault.all
+        scoped.each do |h, slot|
+          filtered   = vault.filter(slot["scopes"], from: secrets)
+          member_key = RbNaCl::Random.random_bytes(32)
+          key_slots[h] = slot.merge(
+            "enc_key" => KeySlot.create(member_key, slot["pub"]),
+            "blob"    => Base64.strict_encode64(Crypto.encrypt(JSON.generate(filtered), member_key))
+          )
+        rescue ArgumentError, KeySlot::DecryptionError
+          # A member whose stored public key is unusable could never decrypt
+          # anything anyway; keep their old slot rather than block the owner.
+          $stderr.puts "  warning: @#{h}'s public key is invalid; their scoped copy was not refreshed."
+        end
+        key_slots
+      rescue Crypto::DecryptionError, JSON::ParserError => e
+        # Fixed message: a parser error's excerpt would contain decrypted bytes.
+        $stderr.puts "Error: could not read '#{store.vault_name}' to rebuild scoped members' copies (#{e.class.name.split("::").last}). Push refused."
+        nil
       end
 
       def bootstrap_owner_slot(key_slots, store)

@@ -45,6 +45,10 @@ module LocalVault
       rescue Crypto::DecryptionError
         $stderr.puts "Error: Wrong passphrase for vault '#{vault_name}'."
         nil
+      rescue JSON::ParserError
+        # Never echo the parser's excerpt: it would contain decrypted bytes.
+        $stderr.puts "Error: Vault '#{vault_name}' decrypted but its data is not valid JSON (corrupt vault data)."
+        nil
       end
 
       def load_key_slots(client, vault_name)

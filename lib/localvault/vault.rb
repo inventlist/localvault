@@ -111,6 +111,24 @@ module LocalVault
       end
     end
 
+    # Replace the entire secrets hash. Used by sync merge, which computes the
+    # full merged result and needs deletions applied as well as additions.
+    #
+    # @param secrets [Hash] nested secrets hash (groups as nested hashes)
+    # @return [void]
+    # @raise [InvalidKeyName] when any key contains invalid characters
+    def replace(secrets)
+      secrets.each do |k, v|
+        if v.is_a?(Hash)
+          validate_key_segment!(k)
+          v.each_key { |sk| validate_key_segment!(sk) }
+        else
+          validate_key!(k)
+        end
+      end
+      write_secrets(secrets)
+    end
+
     # Returns a sorted flat list of all keys. Nested keys use dot-notation.
     #
     # @return [Array<String>] sorted key names, e.g. ["API_KEY", "myapp.DB_URL"]

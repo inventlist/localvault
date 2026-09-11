@@ -13,6 +13,12 @@ module LocalVault
   class SyncState
     FILENAME = ".sync_state"
 
+    # Ciphertext snapshot of secrets.enc as of the last successful sync. This
+    # is the common ancestor a three-way merge needs (see +SyncMerge+); the
+    # checksum alone only says *that* both sides drifted, not *which keys*.
+    # Same bytes and same file mode as secrets.enc, so it leaks nothing new.
+    BASE_FILENAME = ".sync_base"
+
     attr_reader :vault_name
 
     def initialize(vault_name)
@@ -23,8 +29,20 @@ module LocalVault
       File.join(Config.vaults_path, vault_name, FILENAME)
     end
 
+    def base_path
+      File.join(Config.vaults_path, vault_name, BASE_FILENAME)
+    end
+
     def exists?
       File.exist?(path)
+    end
+
+    # @return [String, nil] encrypted secrets bytes as of the last sync, or nil
+    #   when no snapshot was recorded (older clients, or an empty vault).
+    def read_base
+      return nil unless File.exist?(base_path)
+      bytes = File.binread(base_path)
+      bytes.empty? ? nil : bytes
     end
 
     # @return [Hash, nil] parsed YAML data or nil
@@ -46,8 +64,11 @@ module LocalVault
     # Record a successful sync operation.
     #
     # @param checksum [String] SHA256 hex of the local secrets.enc
-    # @param direction [String] "push" or "pull"
-    def write!(checksum:, direction:)
+    # @param direction [String] "push", "pull", "adopt" or "merge"
+    # @param base [String, nil] encrypted secrets bytes to snapshot as the
+    #   merge ancestor. Pass the bytes that +checksum+ was computed from. nil
+    #   (or empty) removes any previous snapshot.
+    def write!(checksum:, direction:, base: nil)
       FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
       data = {
         "last_synced_checksum" => checksum,
@@ -56,6 +77,25 @@ module LocalVault
       }
       File.write(path, YAML.dump(data))
       File.chmod(0o600, path)
+      write_base!(base)
+    end
+
+    # Record both checksum and ancestor snapshot from a store in one call.
+    #
+    # @param store [Store] vault store whose current secrets.enc is now synced
+    # @param direction [String] see +write!+
+    def record!(store, direction:)
+      bytes = store.read_encrypted
+      write!(checksum: self.class.local_checksum(store), direction: direction, base: bytes)
+    end
+
+    def write_base!(bytes)
+      if bytes.nil? || bytes.empty?
+        FileUtils.rm_f(base_path)
+        return
+      end
+      File.binwrite(base_path, bytes)
+      File.chmod(0o600, base_path)
     end
 
     # Compute the SHA256 hex digest of a vault's local secrets.enc.
