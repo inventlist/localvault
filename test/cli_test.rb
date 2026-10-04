@@ -1195,6 +1195,27 @@ class CLITest < Minitest::Test
     end
   end
 
+  # Regression: under the Homebrew wrapper, `lv exec -- bin/rails ...` handed
+  # the child localvault's own GEM_HOME/GEM_PATH, so Bundler looked for the
+  # app's gems in localvault's libexec ("... is not yet checked out").
+  def test_exec_child_does_not_inherit_wrapper_gem_env_when_caller_had_none
+    child_env = exec_through_wrapper(caller_env: { "GEM_HOME" => nil, "GEM_PATH" => nil })
+
+    refute child_env.key?("GEM_HOME"), "child got GEM_HOME=#{child_env["GEM_HOME"]}"
+    refute child_env.key?("GEM_PATH"), "child got GEM_PATH=#{child_env["GEM_PATH"]}"
+    refute child_env.keys.any? { |k| k.start_with?("LOCALVAULT_ORIG_") || k == "LOCALVAULT_WRAPPED" }
+    assert_equal "hello_from_vault", child_env["MY_VAR"]
+  end
+
+  def test_exec_child_gets_the_callers_original_gem_env_back
+    child_env = exec_through_wrapper(
+      caller_env: { "GEM_HOME" => "/caller/gems", "GEM_PATH" => "/caller/gems:/caller/more" }
+    )
+
+    assert_equal "/caller/gems", child_env["GEM_HOME"]
+    assert_equal "/caller/gems:/caller/more", child_env["GEM_PATH"]
+  end
+
   # --- install-mcp ---
 
   def test_mcp_help_explains_install_check_and_injection_first_use
@@ -1370,6 +1391,33 @@ class CLITest < Minitest::Test
     yield
   ensure
     ENV.delete("LOCALVAULT_SESSION")
+  end
+
+  # Runs `localvault exec -- env` through the wrapper install.sh writes (its
+  # heredoc, rendered the way the shell would) and returns the child's env.
+  def exec_through_wrapper(caller_env:)
+    vault = create_test_vault("default")
+    vault.set("MY_VAR", "hello_from_vault")
+    install_sh = File.read(File.expand_path("../../install.sh", __FILE__), encoding: "UTF-8")
+    body = install_sh[/<<WRAPPER\n(.*?)^WRAPPER$/m, 1] or flunk "no WRAPPER heredoc in install.sh"
+    wrapper = body
+      .gsub('"$PREFIX/bin/$BINARY"', File.expand_path("../../bin/localvault", __FILE__).inspect)
+      .gsub("$PREFIX", Gem.paths.home)
+      .gsub("$RUBY", RbConfig.ruby)
+      .gsub("\\$", "$")
+    path = File.join(@test_home, "lv-wrapper")
+    File.write(path, wrapper)
+    File.chmod(0o755, path)
+
+    with_session("default") do
+      env = caller_env.merge(
+        "LOCALVAULT_HOME" => @test_home,
+        "LOCALVAULT_SESSION" => ENV["LOCALVAULT_SESSION"]
+      )
+      output, status = Open3.capture2(env, path, "exec", "--", "/usr/bin/env")
+      assert status.success?, "wrapper exec failed: #{output}"
+      output.lines.to_h { |line| line.chomp.split("=", 2) }
+    end
   end
 
   def cache_vault_session(vault_name, passphrase = test_passphrase)

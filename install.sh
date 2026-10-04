@@ -86,9 +86,14 @@ fi
 
 # ── Write the wrapper ─────────────────────────────────────────────
 # The wrapper pins GEM_HOME and the ruby, so localvault never depends on the
-# ruby that happens to be active in your shell.
+# ruby that happens to be active in your shell. It first saves the caller's
+# GEM_HOME/GEM_PATH so `localvault exec` can hand them back to the child.
 cat > "$BIN_DIR/$BINARY" <<WRAPPER
 #!/bin/sh
+unset LOCALVAULT_ORIG_GEM_HOME LOCALVAULT_ORIG_GEM_PATH
+if [ -n "\${GEM_HOME+x}" ]; then export LOCALVAULT_ORIG_GEM_HOME="\$GEM_HOME"; fi
+if [ -n "\${GEM_PATH+x}" ]; then export LOCALVAULT_ORIG_GEM_PATH="\$GEM_PATH"; fi
+export LOCALVAULT_WRAPPED=1
 export GEM_HOME="$PREFIX"
 export GEM_PATH="$PREFIX"
 exec "$RUBY" "$PREFIX/bin/$BINARY" "\$@"

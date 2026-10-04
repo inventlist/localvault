@@ -467,7 +467,7 @@ module LocalVault
       vault = open_vault!
       skip_warn = ->(k) { $stderr.puts "Warning: skipping unsafe key '#{k}'" }
       env_vars = vault.env_hash(**env_projection_options(on_skip: skip_warn))
-      Kernel.exec(env_vars, *cmd)
+      Kernel.exec(ChildEnv.for_exec(env_vars), *cmd)
     rescue EnvProjection::InvalidMapping, EnvProjection::UnknownProfile => e
       abort_with e.message
     end
