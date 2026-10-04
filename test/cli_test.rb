@@ -1199,7 +1199,9 @@ class CLITest < Minitest::Test
   # the child localvault's own GEM_HOME/GEM_PATH, so Bundler looked for the
   # app's gems in localvault's libexec ("... is not yet checked out").
   def test_exec_child_does_not_inherit_wrapper_gem_env_when_caller_had_none
-    child_env = exec_through_wrapper(caller_env: { "GEM_HOME" => nil, "GEM_PATH" => nil })
+    child_env = exec_through_wrapper(
+      caller_env: { "GEM_HOME" => nil, "GEM_PATH" => nil, "MULTILINE_VAR" => "a\nb" }
+    )
 
     refute child_env.key?("GEM_HOME"), "child got GEM_HOME=#{child_env["GEM_HOME"]}"
     refute child_env.key?("GEM_PATH"), "child got GEM_PATH=#{child_env["GEM_PATH"]}"
@@ -1414,9 +1416,10 @@ class CLITest < Minitest::Test
         "LOCALVAULT_HOME" => @test_home,
         "LOCALVAULT_SESSION" => ENV["LOCALVAULT_SESSION"]
       )
-      output, status = Open3.capture2(env, path, "exec", "--", "/usr/bin/env")
+      # NUL-separated so multi-line values in the caller's env can't break parsing.
+      output, status = Open3.capture2(env, path, "exec", "--", "/usr/bin/env", "-0")
       assert status.success?, "wrapper exec failed: #{output}"
-      output.lines.to_h { |line| line.chomp.split("=", 2) }
+      output.split("\0").to_h { |entry| entry.split("=", 2) }
     end
   end
 

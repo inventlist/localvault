@@ -16,7 +16,8 @@ module LocalVault
     # The full env hash for Kernel.exec: caller's gem vars restored, vault
     # values on top, and the wrapper's bookkeeping vars always unset — a vault
     # key must not be able to plant them for a nested localvault.
-    def self.for_exec(vault_env, env = ENV)
+    def self.for_exec(vault_env, env = ENV, on_skip: nil)
+      (vault_env.keys & BOOKKEEPING_VARS).each { |var| on_skip&.call(var) }
       overrides(env).merge(vault_env).merge(BOOKKEEPING_VARS.to_h { |var| [var, nil] })
     end
 

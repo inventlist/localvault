@@ -80,6 +80,13 @@ class ChildEnvTest < Minitest::Test
     end
   end
 
+  def test_for_exec_warns_when_it_drops_a_reserved_vault_key
+    skipped = []
+    LocalVault::ChildEnv.for_exec({ "LOCALVAULT_WRAPPED" => "1", "API_KEY" => "k" }, {}, on_skip: ->(k) { skipped << k })
+
+    assert_equal ["LOCALVAULT_WRAPPED"], skipped
+  end
+
   def test_install_script_wrapper_records_the_callers_gem_env
     script = File.read(File.expand_path("../install.sh", __dir__), encoding: "UTF-8")
     assert_includes script, "export LOCALVAULT_WRAPPED=1"
