@@ -1,0 +1,247 @@
+/* ============================================================================
+ * Nodepad design tokens - scoped app/workspace snapshot
+ * ----------------------------------------------------------------------------
+ * Design-system library member: nodepad.
+ *
+ * Source CSS: InventList app/assets/stylesheets/nodepad_tokens.css.
+ * Typography docs: InventList docs/design/TOKENS.md, DESIGN_PRINCIPLES.md,
+ * DESIGN_SYSTEM.md, and INTERACTION_PATTERNS.md.
+ *
+ * Copied into Kuickr on 2026-06-29 so agents can select Nodepad separately
+ * from the broader inventlist.com design-system reference. This token sheet is
+ * scoped: apply class="np-tokens" to the page root before referencing these
+ * variables in generated HTML.
+ *
+ * Refreshed 2026-07-21 (spec 35.3) to matte surfaces + Inter, retiring the
+ * editorial serif to the immutable 23a1cbe5 snapshot.
+ *
+ * REALIGNED 2026-08-16 (spec 35.4, founder instruction) to the identity the
+ * founder supplied when this feature was built: Geist, Geist Mono, Instrument
+ * Serif as the accent face, warm paper #faf9f7, near-black ink #0e0d0b, and
+ * amber #e8901a as the accent.
+ *
+ * This CLOSES A SPLIT, it does not open one. The nodepad app-shell adapter
+ * (app/assets/stylesheets/design_systems/nodepad_shell.css) has always mapped
+ * Geist + #faf9f7 + #0e0d0b + #e8901a into the --kk-* roles, so the chrome was
+ * already wearing this identity while this sheet said Inter and focus-green.
+ * A page authored on `nodepad` therefore did not match the chrome around it.
+ * They now agree.
+ *
+ * WHAT DID NOT CHANGE: every token NAME (nothing referencing --np-* breaks), the
+ * operator brand roles (--np-memory / --np-focus / --np-distill are semantic
+ * operator colours, not the accent), the kind chips, and the sticky fills.
+ * The retired snapshots 23a1cbe5 and d15c7c07 stay addressable.
+ * ========================================================================== */
+
+.np-tokens {
+  /* Type families */
+  --np-sans:    Geist, "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --np-display: Geist, "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --np-mono:    "Geist Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  /* The accent face. 35.3 retired it; the founder's landing extraction keeps it,
+     and the app-shell adapter always carried Geist — so the sheet was the odd
+     one out, not the serif. Reserved for a short italic phrase, never body. */
+  --np-accent-serif: "Instrument Serif", Georgia, serif;
+
+  /* Type scale */
+  --np-font-size-s: 13px;
+  --np-font-size-m: 15px;
+  --np-font-size-l: 17px;
+  --np-font-size: var(--np-font-size-m);
+  --np-font-size-title: 22px;
+  --np-font-size-body: 15px;
+  --np-font-size-meta: 11px;
+  --np-font-size-kind: 10.5px;
+  --np-font-size-ref: 11.5px;
+  --np-line-height-title: 1.2;
+  --np-line-height-body: 1.5;
+  --np-line-height-meta: 1.2;
+
+  /* Reading widths */
+  --np-reading-narrow: 576px;
+  --np-reading-wide: 768px;
+
+  /* Surfaces */
+  --np-bg:            #ffffff;
+  --np-wash:          #faf9f7;
+  --np-paper-runtime: #faf9f7;
+  --np-paper-deep:    #f3f1ed;
+  --np-paper-edge:    #e9e6e0;
+  --np-rule-runtime:  #d9d3c7;
+
+  /* Ink + text */
+  --np-ink:          #0e0d0b;
+  --np-ink-runtime:  #0e0d0b;
+  --np-text:         #55504a;
+  --np-ink-soft:     #3d3629;
+  --np-muted:        #8c8578;
+  --np-muted-soft:   #9d968b;
+  --np-line:         #e9e6e0;
+  --np-line-soft:    #efede8;
+  --np-rule:         #0e0d0b;
+
+  /* The accent. Amber is PUNCTUATION (rule 2): one element per view — a serif
+     italic phrase, a callout rule, a terminal token. Never a large fill and
+     never a button; primary actions are ink. --np-amber-text is the readable
+     relative for links, --np-amber-ink for a mono label on an amber tint. */
+  --np-amber:       #e8901a;
+  --np-amber-text:  #875006;
+  --np-amber-ink:   #9a6b0c;
+  --np-highlight:      #fdf3d2;
+  --np-highlight-line: #f5e3b4;
+
+  /* Operator brand */
+  --np-memory:  #7a1f1a;
+  --np-focus:   #3a5a3f;
+  --np-distill: #8a6a1f;
+  --np-scratch: #847866;
+  --np-queue:   #3a4f7a;
+
+  --np-memory-soft:  color-mix(in srgb, var(--np-memory)  35%, #fff);
+  --np-focus-soft:   color-mix(in srgb, var(--np-focus)   40%, #fff);
+  --np-distill-soft: color-mix(in srgb, var(--np-distill) 45%, #fff);
+
+  --operator-capture: var(--np-memory);
+  --operator-focus:   var(--np-focus);
+  --operator-distill: var(--np-distill);
+
+  /* Kind chips */
+  --kind-decision: #4b7bd7;
+  --kind-blocker:  #d74b4b;
+  --kind-question: #8b5cf6;
+  --kind-idea:     #e8a53b;
+  --kind-parked:   #6b7280;
+  --kind-outcome:  #2fb36b;
+
+  /* Sticky-note fills */
+  --sticky-yellow: #fef5a8;
+  --sticky-blue:   #d9e5ff;
+  --sticky-pink:   #ffd9ea;
+  --sticky-green:  #d1f0d6;
+  --sticky-lilac:  #e2d9ff;
+
+  /* Rhythm + radii */
+  --r-1: 4px;  --r-2: 8px;  --r-3: 12px; --r-4: 16px;
+  --r-5: 24px; --r-6: 32px; --r-7: 48px; --r-8: 72px;
+  --r-base: 8px;
+  --rad-1: 3px; --rad-2: 5px; --rad-3: 8px; --rad-4: 12px; --rad-pill: 999px;
+
+  /* Motion */
+  --t-fast: 120ms;
+  --t-base: 200ms;
+  --t-slow: 320ms;
+  --ease-out:    cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-settle: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Local aliases used by Nodepad components. */
+  --bg:         var(--np-bg);
+  --wash:       var(--np-wash);
+  --paper:      var(--np-paper-runtime);
+  --paper-deep: var(--np-paper-deep);
+  --paper-edge: var(--np-paper-edge);
+  --rule-soft:  var(--np-rule-runtime);
+  --ink:        var(--np-ink);
+  --ink-runtime:var(--np-ink-runtime);
+  --text:       var(--np-text);
+  --ink-soft:   var(--np-ink-soft);
+  --muted:      var(--np-muted);
+  --muted-soft: var(--np-muted-soft);
+  --line:       var(--np-line);
+  --rule:       var(--np-rule);
+  --memory:     var(--np-memory);
+  --focus:      var(--np-focus);
+  --distill:    var(--np-distill);
+  --scratch:    var(--np-scratch);
+  --queue:      var(--np-queue);
+  --sans:       var(--np-sans);
+  --display:    var(--np-display);
+  --mono:       var(--np-mono);
+  --font-size:  var(--np-font-size);
+  --r1: var(--rad-2); --r2: var(--rad-3); --r3: var(--rad-4);
+
+  --accent:      var(--np-amber);
+  --accent-wash: color-mix(in srgb, var(--np-amber) 10%, transparent);
+
+  /* Contrast-safe accent roles (spec 35.3). --accent and --np-theme-accent are
+   * indicator/orientation colors — do NOT use them for body text or filled-
+   * button labels. These two carry a name that can't fail contrast, AA-checked
+   * per theme. Additive: they change no existing value.
+   * accent-text = the accent as readable text on a surface (7.4:1 light paper,
+   * 8.4:1 dark). on-accent = text on an accent fill, flipping ink and white. */
+  --np-accent-text: #875006;  /* amber, darkened to carry text on paper — AA */
+  --np-on-accent:   #ffffff;  /* text ON an accent fill — flips ink and white by theme */
+}
+
+.np-tokens[data-theme="light"],
+[data-theme="light"] .np-tokens {
+  --np-bg:            #ffffff;
+  --np-wash:          #faf9f7;
+  --np-paper-runtime: #faf9f7;
+  --np-paper-deep:    #f3f1ed;
+  --np-paper-edge:    #e9e6e0;
+  --np-ink-runtime:   #0e0d0b;
+  --np-text:          #55504a;
+  --np-muted:         #8c8578;
+  --np-accent-text:   #875006;
+  --np-on-accent:     #ffffff;
+}
+
+.np-tokens[data-theme="dark"],
+[data-theme="dark"] .np-tokens {
+  --np-bg:            #0e0d0b;
+  --np-wash:          #131110;
+  --np-paper-runtime: #1a1816;
+  --np-paper-deep:    #211e1a;
+  --np-paper-edge:    #3a3833;
+  --np-ink-runtime:   #faf9f7;
+  --np-text:          #c9c3b6;
+  --np-muted:         #8c8578;
+  --np-accent-text:   #f0a742;  /* amber lifted to read on the ink ground */
+  --np-on-accent:     #0e0d0b;  /* ink on the amber fill */
+}
+
+.np-tokens[data-density="compact"],
+[data-density="compact"] .np-tokens {
+  --r-base: 6px;
+}
+
+.np-tokens[data-density="comfortable"],
+[data-density="comfortable"] .np-tokens {
+  --r-base: 8px;
+}
+
+.np-tokens[data-density="cozy"],
+[data-density="cozy"] .np-tokens {
+  --r-base: 10px;
+}
+
+.np-tokens[data-font-size="s"],
+[data-font-size="s"] .np-tokens {
+  --np-font-size: var(--np-font-size-s);
+}
+
+.np-tokens[data-font-size="m"],
+[data-font-size="m"] .np-tokens {
+  --np-font-size: var(--np-font-size-m);
+}
+
+.np-tokens[data-font-size="l"],
+[data-font-size="l"] .np-tokens {
+  --np-font-size: var(--np-font-size-l);
+}
+
+:root                          { --np-theme-accent: #e8a53b; }
+:root[data-accent="amber"]     { --np-theme-accent: #e8a53b; }
+:root[data-accent="violet"]    { --np-theme-accent: #8b5cf6; }
+:root[data-accent="memory"]    { --np-theme-accent: #7a1f1a; }
+:root[data-accent="focus"]     { --np-theme-accent: #3a5a3f; }
+:root[data-accent="distill"]   { --np-theme-accent: #8a6a1f; }
+:root[data-accent="scratch"]   { --np-theme-accent: #847866; }
+:root[data-accent="queue"]     { --np-theme-accent: #3a4f7a; }
+
+/* Matte surface (spec 35.3): a solid wash, no ambient glow. The founder's
+ * 2026-07-21 override retires the reference artifact's radial wash. */
+.np-tokens.np-wash,
+.np-tokens .np-wash {
+  background: var(--np-wash);
+}

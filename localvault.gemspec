@@ -8,11 +8,11 @@ Gem::Specification.new do |spec|
 
   spec.summary       = "Zero-infrastructure secrets manager"
   spec.description   = "Encrypted local vault for secrets with MCP server for AI agents. No cloud required. Powers credentials management at inventlist.com."
-  spec.homepage      = "https://github.com/inventlist/localvault"
+  spec.homepage      = "https://localvault.kuickr.co/"
   spec.license       = "MIT"
 
   spec.metadata = {
-    "homepage_uri" => "https://inventlist.com/tools/localvault",
+    "homepage_uri" => "https://localvault.kuickr.co/",
     "source_code_uri" => "https://github.com/inventlist/localvault",
     "funding_uri" => "https://inventlist.com"
   }

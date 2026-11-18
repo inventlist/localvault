@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en" class="np-tokens np-wash" data-theme="light" data-kuickr-bar="peek">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LocalVault — your secrets stay local</title>
+<meta name="description" content="A free, open-source local secrets vault with CLI and MCP. Encrypt API keys on your machine and inject credentials into the processes that need them.">
+<link rel="canonical" href="https://localvault.kuickr.co/">
+<meta property="og:title" content="LocalVault — your secrets stay local">
+<meta property="og:description" content="Encrypted on your machine. Available to your tools. Free, open-source CLI and local MCP.">
+<meta property="og:url" content="https://localvault.kuickr.co/">
+<meta property="og:type" content="website">
+<style>/* NODEPAD_TOKENS */</style>
+<style>
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:var(--np-wash);color:var(--np-ink-runtime);font:16px/1.65 var(--np-sans)}a{color:inherit;text-underline-offset:4px}button,input{font:inherit}button,a{-webkit-tap-highlight-color:transparent}button{cursor:pointer}a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid var(--np-accent-text);outline-offset:4px}button:disabled{cursor:default}.wrap{width:min(1100px,100%);margin:auto;padding:0 28px}header{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:90px;border-bottom:1px solid var(--np-line)}.brand{display:flex;align-items:center;gap:12px;text-decoration:none;font-size:20px;font-weight:650;letter-spacing:-.6px}.brand svg{width:27px;height:32px}.nav{display:flex;align-items:center;gap:22px}.nav a{font-size:14px;text-decoration:none;min-height:44px;display:inline-flex;align-items:center}.theme{background:none;border:1px solid var(--np-line);border-radius:50%;width:44px;height:44px;color:inherit}.hero{padding:80px 0 68px;display:grid;grid-template-columns:1fr 1fr;gap:54px;align-items:center}.hero h1{font-size:clamp(42px,6vw,70px);line-height:1.05;letter-spacing:-3px;margin:0 0 24px;font-weight:580;max-width:9ch}.lede{font-size:19px;line-height:1.6;color:var(--np-text);max-width:36ch;margin:0}.actions{display:flex;flex-wrap:wrap;gap:12px;margin:30px 0 20px}.button{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:10px 19px;border:1px solid var(--np-ink-runtime);border-radius:var(--rad-2);text-decoration:none;font-size:14px;font-weight:600;background:var(--np-ink-runtime);color:var(--np-bg)}.button.secondary{background:transparent;color:var(--np-ink-runtime);border-color:var(--np-line)}.quiet{font-size:13px;color:var(--np-text)}.vault{border:1px solid var(--np-rule-runtime);border-radius:var(--rad-4);background:var(--np-bg);overflow:hidden}.vault-head{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--np-line);padding:16px 20px;font:12px var(--np-mono);color:var(--np-text)}.vault-body{padding:28px 24px}.vault-label{font-size:13px;color:var(--np-text);margin:0 0 12px}.secret-row{font:13px var(--np-mono);padding:14px 0;display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--np-line-soft)}.secret-row span:last-child{color:var(--np-text)}.pipeline{margin-top:24px;padding:18px;background:var(--np-paper-deep);border-radius:var(--rad-2);font-size:13px}.pipeline strong{display:block;font-weight:550}.pipeline code{display:block;font:12px/1.7 var(--np-mono);margin-top:8px;overflow-wrap:anywhere}.boundary{display:flex;align-items:center;gap:10px;margin-top:20px;font-size:12px;color:var(--np-text)}.dot{width:7px;height:7px;border-radius:50%;background:var(--np-amber);flex:none}.strip{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:20px 0;border-block:1px solid var(--np-line);font-size:13px;color:var(--np-text)}section{padding:66px 0;border-bottom:1px solid var(--np-line)}h2{font-size:clamp(28px,4vw,38px);line-height:1.15;letter-spacing:-1.1px;font-weight:550;margin:0 0 18px}h3{font-size:18px;line-height:1.4;margin:0 0 10px;font-weight:600}p{max-width:70ch}.section-top{display:grid;grid-template-columns:1fr 1fr;gap:36px;margin-bottom:28px}.section-top p{margin:0;color:var(--np-text)}.terminal{border:1px solid var(--np-rule-runtime);border-radius:var(--rad-3);overflow:hidden;background:var(--np-bg)}.terminal-toolbar{display:flex;gap:4px;flex-wrap:wrap;padding:10px;border-bottom:1px solid var(--np-line);background:var(--np-paper-deep)}.demo-tab{border:0;background:none;color:var(--np-text);border-radius:var(--rad-2);padding:10px 14px;min-height:44px;font-size:13px}.demo-tab[aria-pressed="true"]{background:var(--np-bg);color:var(--np-ink-runtime);box-shadow:0 1px 2px var(--np-line)}.terminal pre{padding:24px;margin:0;min-height:260px;font:13px/1.9 var(--np-mono);white-space:pre-wrap;overflow-wrap:anywhere}.terminal-foot{padding:12px 20px;border-top:1px solid var(--np-line);font-size:12px;color:var(--np-text)}.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:30px}.steps p{color:var(--np-text);font-size:14px;margin:0}.step-number{font:12px var(--np-mono);display:block;color:var(--np-text);margin-bottom:16px}.install-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}.install-box{padding:24px;background:var(--np-bg);border:1px solid var(--np-line);border-radius:var(--rad-3);min-width:0}.install-box p{color:var(--np-text);font-size:14px}.code{display:block;padding:16px;margin:18px 0;background:var(--np-paper-deep);font:12px/1.9 var(--np-mono);white-space:pre-wrap;overflow-wrap:anywhere;border-radius:var(--rad-2)}.security-grid{display:grid;grid-template-columns:1fr 1fr;gap:40px}.security-grid ul{padding-left:20px;color:var(--np-text);font-size:14px}.security-grid li{margin:12px 0}.notice{border-left:3px solid var(--np-rule-runtime);padding:4px 0 4px 20px;margin-top:26px;color:var(--np-text);font-size:14px}.docs{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.doc{display:block;min-height:128px;padding:22px;border:1px solid var(--np-line);border-radius:var(--rad-3);text-decoration:none;background:var(--np-bg)}.doc strong{display:block;font-size:15px;margin-bottom:8px}.doc span{font-size:13px;color:var(--np-text)}details{border-top:1px solid var(--np-line);padding:18px 0}summary{cursor:pointer;font-weight:550;min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:20px}summary::after{content:'+';font:20px var(--np-mono)}details[open] summary::after{content:'−'}details p{font-size:14px;color:var(--np-text);margin:10px 0 4px}footer{padding:30px 0 72px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px;font-size:12px;color:var(--np-text)}footer a{margin-left:18px}.skip{position:absolute;left:-10000px}.skip:focus{left:20px;top:15px;padding:10px;background:var(--np-bg);z-index:10}
+@media(max-width:860px){.hero{gap:28px;padding-top:52px}.hero h1{letter-spacing:-2px}.steps{gap:20px}.docs{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.wrap{padding:0 20px}header{min-height:78px;gap:10px}.nav{gap:14px}.nav .optional{display:none}.hero{grid-template-columns:1fr;padding:44px 0;gap:34px}.hero h1{max-width:11ch}.lede{font-size:17px}.vault-body{padding:20px}.secret-row{font-size:11px}.strip{font-size:12px;justify-content:flex-start;gap:10px 22px}section{padding:44px 0}.section-top,.install-grid,.security-grid,.steps,.docs{grid-template-columns:1fr;gap:22px}.section-top{margin-bottom:24px}.terminal pre{padding:18px;font-size:11px;min-height:290px}.demo-tab{padding:9px 12px}.install-box{padding:20px}.doc{min-height:104px}.step-number{margin-bottom:8px}footer a{margin:0 18px 0 0}footer{padding-bottom:90px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="wrap">
+<header>
+  <a class="brand" href="https://localvault.kuickr.co/" aria-label="LocalVault home"><svg viewBox="0 0 28 34" fill="none" aria-hidden="true"><path d="M14 2 26 7v10c0 7-5 12-12 15C7 29 2 24 2 17V7L14 2Z" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="14" width="10" height="8" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M11 14v-3a3 3 0 0 1 6 0v3" stroke="currentColor" stroke-width="1.5"/></svg>LocalVault</a>
+  <nav class="nav" aria-label="Main navigation"><a href="#demo">Try it</a><a class="optional" href="#guides">Guides</a><a href="https://github.com/inventlist/localvault" target="_blank" rel="noopener">GitHub</a><button class="theme" type="button" aria-label="Switch to dark theme" title="Switch theme">◐</button></nav>
+</header>
+<main id="main">
+<div class="hero">
+  <div><h1>Your secrets.<br>Your machine.</h1><p class="lede">An encrypted home for API keys, tokens, and credentials. Give your tools access without copying secrets into AI chats or MCP configs.</p><div class="actions"><a class="button" href="#install">Install LocalVault</a><a class="button secondary" href="#demo">Explore the commands</a></div><p class="quiet">Free, open source · CLI + local MCP · macOS &amp; Linux</p></div>
+  <div class="vault" aria-label="Illustration of a local encrypted vault">
+    <div class="vault-head"><span>~/.localvault/vaults/work</span><span>Encrypted</span></div>
+    <div class="vault-body"><p class="vault-label">Your credentials, kept together.</p><div class="secret-row"><span>myapp.DATABASE_URL</span><span>••••••••••••</span></div><div class="secret-row"><span>myapp.STRIPE_KEY</span><span>••••••••••••</span></div><div class="secret-row"><span>myapp.OPENAI_API_KEY</span><span>••••••••••••</span></div><div class="pipeline"><strong>Unlock locally. Inject when needed.</strong><code>localvault exec --project myapp -- rails server</code></div><div class="boundary"><span class="dot"></span>No account needed for local use.</div></div>
+  </div>
+</div>
+<div class="strip"><span>Argon2id key derivation</span><span>libsodium encryption</span><span>Process-scoped injection</span><span>Readable source code</span></div>
+<section id="demo">
+  <div class="section-top"><h2>A small tool.<br>A useful routine.</h2><p>Explore the everyday commands. This demo shows illustrative output only: it never runs commands, reads your files, or asks for real secrets.</p></div>
+  <div class="terminal"><div class="terminal-toolbar" role="group" aria-label="Command examples"><button class="demo-tab" data-demo="store" aria-pressed="true">Store a secret</button><button class="demo-tab" data-demo="run" aria-pressed="false">Run an app</button><button class="demo-tab" data-demo="mcp" aria-pressed="false">Connect MCP</button><button class="demo-tab" data-demo="groups" aria-pressed="false">Find a project</button><button class="demo-tab" data-demo="sync" aria-pressed="false">Optional sync</button></div><pre id="demo-output" tabindex="0" aria-label="Illustrative terminal output">$ localvault init work
+Create a passphrase for this local vault.
+
+$ printf '%s' "$OPENAI_API_KEY" | localvault set myapp.OPENAI_API_KEY --stdin -v work
+Secret stored in the encrypted vault.
+
+$ localvault list -v work
+myapp.OPENAI_API_KEY
+
+Discover names. Keep values out of command arguments.</pre><div class="terminal-foot">Illustrative replay · No real credentials · Nothing is executed</div></div>
+</section>
+<section>
+  <div class="section-top"><h2>Keep the secret<br>out of the conversation.</h2><p>LocalVault runs beside your tools. Your agent can discover a credential’s name and prepare an injection command without retrieving its value.</p></div>
+  <div class="steps"><div><span class="step-number">1 / Store</span><h3>Encrypt on your machine</h3><p>Use a local vault for credentials. Supply values through stdin rather than putting them in command arguments.</p></div><div><span class="step-number">2 / Select</span><h3>Give each process what it needs</h3><p>Select keys, project groups, or mappings. Avoid exporting every credential into every command.</p></div><div><span class="step-number">3 / Run</span><h3>Inject into the child process</h3><p>The command receives credentials through its environment. The agent does not need to paste their values into a tool call.</p></div></div>
+</section>
+<section id="install">
+  <div class="section-top"><h2>Start locally.</h2><p>Install the CLI, create a vault, and connect your MCP client. Local use needs no cloud account or subscription.</p></div>
+  <div class="install-grid"><div class="install-box"><h3>With Homebrew</h3><code class="code">brew install inventlist/tap/localvault</code><p>Then create and unlock a vault:</p><code class="code">localvault init
+localvault unlock
+localvault doctor</code></div><div class="install-box"><h3>Without Homebrew</h3><code class="code">curl --proto '=https' --tlsv1.2 -fsSL https://inventlist.github.io/localvault/install.sh | sh</code><p>The installer uses an isolated Ruby gem prefix. Ruby 3.2+ and libsodium are required. <a href="https://github.com/inventlist/localvault/blob/main/install.sh" target="_blank" rel="noopener">Read the installer first</a>.</p><p>Already use RubyGems? <code>gem install localvault</code> also works.</p></div></div>
+  <div class="install-box" style="margin-top:24px"><h3>Connect your AI tool</h3><code class="code">localvault install-mcp claude-code
+localvault unlock
+localvault mcp --check</code><p>Cursor and Windsurf are also supported. Prefer <code>list_secrets</code> and <code>localvault_build_exec</code> for discovery and injection. Plaintext retrieval is an explicit, separate operation.</p></div>
+</section>
+<section id="security">
+  <div class="section-top"><h2>Understand the boundary.</h2><p>Encryption helps only when the whole workflow respects it. Read the implementation, choose what you grant, and know where credentials can appear.</p></div>
+  <div class="security-grid"><div><h3>What local mode does</h3><ul><li>Stores encrypted vault files on your device.</li><li>Uses Argon2id and libsodium’s authenticated encryption.</li><li>Runs MCP locally over stdio.</li><li>Supports scoped process injection without requiring plaintext in model context.</li></ul></div><div><h3>What it cannot promise</h3><ul><li>A compromised device or untrusted child process can expose unlocked credentials.</li><li>A child process may print credentials into logs or output.</li><li>Explicit plaintext MCP retrieval puts the value into the calling client’s context.</li><li>Removing a recipient cannot erase credentials they already received.</li></ul></div></div>
+  <div class="notice"><strong>Optional sync today.</strong> The current sync and team-sharing workflow uses InventList by default and uploads encrypted vault data. Local mode does not require it. User-owned remote storage and independently verified sharing are a proposed next step, not a shipped feature. Hosting this website on Kuickr does not change the vault’s storage behavior.</div>
+</section>
+<section id="guides"><div class="section-top"><h2>Read, then build.</h2><p>Practical guides, the security model, and the source behind the commands.</p></div><div class="docs"><a class="doc" href="https://kuickr.co/spaces/localvault/series/01-getting-started.md" target="_blank" rel="noopener"><strong>Getting started</strong><span>Installation, vaults, and your first secret.</span></a><a class="doc" href="https://kuickr.co/spaces/localvault/series/03-mcp-for-ai-agents.md" target="_blank" rel="noopener"><strong>MCP for AI agents</strong><span>Connect your client and choose an access workflow.</span></a><a class="doc" href="https://kuickr.co/spaces/localvault/series/07-security-model.md" target="_blank" rel="noopener"><strong>Security model</strong><span>Encryption, storage, and trust boundaries.</span></a><a class="doc" href="https://kuickr.co/spaces/localvault/series/08-cli-reference.md" target="_blank" rel="noopener"><strong>CLI reference</strong><span>Commands for everyday vault management.</span></a><a class="doc" href="https://kuickr.co/spaces/localvault/series/15-scoped-env-injection.md" target="_blank" rel="noopener"><strong>Scoped injection</strong><span>Select and map just the keys a process needs.</span></a><a class="doc" href="https://github.com/inventlist/localvault" target="_blank" rel="noopener"><strong>Inspect the source</strong><span>Implementation, tests, releases, and issues.</span></a></div></section>
+<section><h2>A few practical questions.</h2><details><summary>Do I need an account?</summary><p>No account is required to store and use secrets locally or run the local MCP server. The existing optional InventList sync workflow requires an account.</p></details><details><summary>Is LocalVault free?</summary><p>The CLI and local MCP are free and open source. A paid team service is a future possibility; it is not required for local use.</p></details><details><summary>Does the website receive my secrets?</summary><p>This site is documentation and a non-executing demo. It has no connection to your local vault and provides no secret-entry form. The optional sync service is separate and stores encrypted vault data today.</p></details><details><summary>Can I share without trusting a hosted key directory?</summary><p>The proposed design is to verify a recipient’s key through a separate trusted channel, encrypt locally, and exchange the encrypted files through storage you control. That workflow still needs implementation and review; the currently shipped team workflow uses InventList.</p></details></section>
+</main>
+<footer><span>LocalVault · Free, open-source developer tooling</span><div><a href="https://github.com/inventlist/localvault/releases" target="_blank" rel="noopener">Releases</a><a href="https://github.com/inventlist/localvault/issues" target="_blank" rel="noopener">Issues</a><a href="https://kuickr.co" target="_blank" rel="noopener">Hosted on Kuickr</a></div></footer>
+</div>
+<script>
+const examples = {
+  store: document.getElementById('demo-output').textContent,
+  run: `$ localvault exec --project myapp -v work -- rails server
+The child process receives the myapp credentials.
+The project prefix is removed from environment names.
+
+$ localvault exec --only myapp.STRIPE_KEY --map myapp.STRIPE_KEY=STRIPE_SECRET_KEY -v work -- ruby billing.rb
+Only the selected credential is injected.
+
+The program can use the key without pasting it into an AI chat.`,
+  mcp: `$ localvault install-mcp claude-code
+Configure LocalVault as a user-scoped MCP server.
+
+$ localvault unlock
+Unlock the local vault for your session.
+
+$ localvault mcp --check
+Check readiness without starting a blocking server.
+
+Agent workflow: list_secrets → localvault_build_exec
+Then run the prepared command with scoped injection.`,
+  groups: `$ localvault groups -v work
+myapp
+analytics
+
+$ localvault show --group myapp -v work
+myapp.DATABASE_URL     ••••••••
+myapp.STRIPE_KEY       ••••••••
+myapp.OPENAI_API_KEY   ••••••••
+
+Values stay masked. Dot-notation keeps projects together.`,
+  sync: `$ localvault sync --dry-run
+Preview pushes, pulls, and conflicts.
+
+$ localvault sync diff production
+Compare key names without printing values.
+
+Optional sync currently uses InventList by default.
+Encrypted vault data is uploaded when you choose to sync.
+User-owned remote storage is proposed, not shipped.`
+};
+document.querySelectorAll('[data-demo]').forEach(button => button.addEventListener('click', () => {
+  document.querySelectorAll('[data-demo]').forEach(tab => tab.setAttribute('aria-pressed', String(tab === button)));
+  const output = document.getElementById('demo-output');
+  output.textContent = examples[button.dataset.demo];
+}));
+document.querySelector('.theme').addEventListener('click', event => {
+  const dark = document.documentElement.dataset.theme !== 'dark';
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  event.currentTarget.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
+});
+</script>
+</body>
+</html>

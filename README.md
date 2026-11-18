@@ -2,9 +2,9 @@
 
 Encrypted local secrets vault with MCP server for AI agents. Zero infrastructure, zero cloud dependency.
 
-> **[Try the interactive demo](https://inventlist.com/tools/localvault/cli)** — explore every command in your browser.
+> **[Website and interactive demo](https://localvault.kuickr.co/)** — installation, command examples, and guides.
 
-Part of [InventList Tools](https://inventlist.com/tools/localvault) — free, open-source developer utilities for indie builders.
+Free, open-source developer tooling. The public site is hosted on Kuickr; source code and the installer stay on GitHub.
 
 ---
 
@@ -19,7 +19,7 @@ brew install inventlist/tap/localvault
 ### Install script (no Homebrew)
 
 ```bash
-curl -sSL https://inventlist.com/tools/localvault/install.sh | sh
+curl --proto '=https' --tlsv1.2 -fsSL https://inventlist.github.io/localvault/install.sh | sh
 ```
 
 Installs into an isolated prefix (`~/.localvault/runtime`) and writes a wrapper
