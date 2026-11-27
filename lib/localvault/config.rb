@@ -159,5 +159,34 @@ module LocalVault
       data["api_url"] = url
       save(data)
     end
+
+    SESSION_TTL_DEFAULT_HOURS = 8
+    SESSION_TTL_RANGE = (1..24)
+
+    # How long an unlocked vault or identity key stays cached.
+    #
+    # +LOCALVAULT_SESSION_TTL_HOURS+ wins for one process, then +session_ttl_hours+
+    # in config.yml, then 8. Values are clamped to 1–24; anything unparseable
+    # falls through to the next source.
+    #
+    # @return [Integer] hours
+    def self.session_ttl_hours
+      [ENV["LOCALVAULT_SESSION_TTL_HOURS"], load["session_ttl_hours"]].each do |raw|
+        hours = Integer(raw.to_s, exception: false)
+        return hours.clamp(SESSION_TTL_RANGE.min, SESSION_TTL_RANGE.max) if hours
+      end
+      SESSION_TTL_DEFAULT_HOURS
+    end
+
+    # @param hours [Integer, nil] nil removes the setting
+    def self.session_ttl_hours=(hours)
+      data = load
+      if hours.nil?
+        data.delete("session_ttl_hours")
+      else
+        data["session_ttl_hours"] = Integer(hours).clamp(SESSION_TTL_RANGE.min, SESSION_TTL_RANGE.max)
+      end
+      save(data)
+    end
   end
 end

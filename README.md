@@ -153,7 +153,10 @@ backward compatibility but the top-level forms are preferred.
 
 | Command | Description |
 |---------|-------------|
-| `keys generate` | Generate X25519 identity keypair |
+| `keys generate` | Generate an X25519 identity keypair, private key sealed with an identity passphrase |
+| `keys protect` | Seal a key from an older install, or change the identity passphrase |
+| `keys unlock` | Unlock the identity key for this session |
+| `keys status` | Show whether the identity key is protected (never prints key material) |
 | `keys show` | Display your public key |
 | `keys publish` | Upload public key to InventList (required before others can add you) |
 
@@ -352,7 +355,9 @@ localvault get API_KEY
 localvault exec -- rails server
 ```
 
-Unlocking writes a derived key to `LOCALVAULT_SESSION` and also caches it with an 8-hour TTL in Keychain or LocalVault's file fallback so MCP and new terminals can reuse it until `localvault lock`.
+Unlocking writes a derived key to `LOCALVAULT_SESSION` and also caches it in Keychain or LocalVault's file fallback so MCP and new terminals can reuse it until `localvault lock`. The cache lasts 8 hours by default; `localvault config set session-ttl HOURS` (1–24) changes it. On Linux the file fallback uses `$XDG_RUNTIME_DIR` (tmpfs) when available.
+
+New passphrases (vaults and identity) must be at least 12 characters and not a common passphrase.
 
 ## Security
 
@@ -393,7 +398,7 @@ install allow the call rather than breaking your session.
 
 | Layer | Algorithm | Purpose |
 |-------|-----------|---------|
-| Key derivation | **Argon2id** (64 MB, 3 iterations) | Passphrase → master key |
+| Key derivation | **Argon2id** (64 MB, 2 iterations) | Passphrase → master key, and identity passphrase → identity key |
 | Encryption | **XSalsa20-Poly1305** | Authenticated encryption |
 | Key exchange | **X25519** | Team key slots + vault sharing |
 
@@ -408,8 +413,9 @@ install allow the call rather than breaking your session.
 ```
 ~/.localvault/
 ├── config.yml              # Default vault, server URL, token
-├── identity.key            # X25519 private key (encrypted at rest)
-├── identity.pub            # X25519 public key (safe to share)
+├── keys/
+│   ├── identity.priv       # X25519 private key, sealed with your identity passphrase (0600)
+│   └── identity.pub        # X25519 public key (safe to share)
 ├── vaults/
 │   ├── default/
 │   │   ├── meta.yml        # Salt, creation date, version

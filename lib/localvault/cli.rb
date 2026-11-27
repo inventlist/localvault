@@ -189,8 +189,8 @@ module LocalVault
       vault_name = name || Config.default_vault
       passphrase = prompt_passphrase("Passphrase: ")
 
-      if passphrase.empty?
-        abort_with "Passphrase cannot be empty"
+      if (problem = PassphrasePolicy.check(passphrase))
+        abort_with problem
         return
       end
 
@@ -623,8 +623,8 @@ module LocalVault
       vault.all  # verify
 
       new_pass = prompt_passphrase("New passphrase: ")
-      if new_pass.empty?
-        abort_with "Passphrase cannot be empty"
+      if (problem = PassphrasePolicy.check(new_pass))
+        abort_with problem
         return
       end
 
@@ -667,8 +667,8 @@ module LocalVault
       # vault. If the user enters empty / mismatched / interrupts, we abort
       # without touching anything on disk.
       passphrase = prompt_passphrase("New passphrase: ")
-      if passphrase.empty?
-        abort_with "Passphrase cannot be empty"
+      if (problem = PassphrasePolicy.check(passphrase))
+        abort_with problem
         return
       end
 
@@ -688,14 +688,14 @@ module LocalVault
       abort_with e.message
     end
 
-    desc "lock [NAME]", "Clear cached passphrase for a vault (or all vaults)"
+    desc "lock [NAME]", "Clear cached passphrase for a vault (or all vaults and the identity key)"
     def lock(name = nil)
       if name
         SessionCache.clear(name)
         $stdout.puts "Session cleared for vault '#{name}'."
       else
         SessionCache.clear_all
-        $stdout.puts "All vault sessions cleared."
+        $stdout.puts "All vault sessions cleared. Identity key locked."
       end
     end
 
@@ -807,6 +807,8 @@ module LocalVault
 
     require_relative "cli/team_helpers"
     include TeamHelpers
+    require_relative "cli/identity_prompts"
+    include IdentityPrompts
 
     require_relative "cli/keys"
     require_relative "cli/team"
@@ -847,9 +849,12 @@ module LocalVault
         return
       end
 
+      passphrase = choose_new_passphrase("identity")
+      return unless passphrase
+
       Config.ensure_directories!
-      Identity.generate!(force: options[:force])
-      $stdout.puts "Keypair generated."
+      Identity.generate!(force: options[:force], passphrase: passphrase)
+      $stdout.puts "Keypair generated (private key passphrase-protected)."
       $stdout.puts "Public key: #{Identity.public_key}"
     end
 
@@ -903,7 +908,13 @@ module LocalVault
       Config.inventlist_handle = handle
 
       Config.ensure_directories!
-      Identity.generate! unless Identity.exists?
+      unless Identity.exists?
+        $stdout.puts "Creating your identity keypair. Its private key is protected by an identity passphrase."
+        passphrase = choose_new_passphrase("identity")
+        return unless passphrase
+
+        Identity.generate!(passphrase: passphrase)
+      end
 
       client.publish_public_key(Identity.public_key)
 
@@ -920,7 +931,7 @@ module LocalVault
       end
     end
 
-    desc "config SUBCOMMAND ...", "Get or set CLI configuration (currently: server)"
+    desc "config SUBCOMMAND ...", "Get or set CLI configuration (server, session-ttl)"
     long_desc <<~DESC
       Read or write LocalVault configuration in ~/.localvault/config.yml.
 
@@ -930,10 +941,18 @@ module LocalVault
       \x05    localvault config get server
       \x05    localvault config set server https://vaulthost.example
       \x05    localvault config unset server              # back to https://inventlist.com
+
+      How long an unlocked vault or identity key stays cached (1–24 hours,
+      default 8; LOCALVAULT_SESSION_TTL_HOURS overrides it for one process):
+
+      \x05    localvault config set session-ttl 2
+      \x05    localvault config unset session-ttl
     DESC
     def config(action = "get", field = nil, value = nil)
+      return config_session_ttl(action, value) if field == "session-ttl"
+
       unless field == "server" || (action == "get" && field.nil?)
-        return abort_with "Unknown config field '#{field}'. Supported: server"
+        return abort_with "Unknown config field '#{field}'. Supported: server, session-ttl"
       end
 
       case action
@@ -1022,8 +1041,14 @@ module LocalVault
         return
       end
 
-      unless Identity.private_key_bytes
+      unless Identity.exists?
         abort_with "No keypair found. Run: localvault keys generate"
+        return
+      end
+
+      my_private_key = identity_private_key
+      unless my_private_key
+        abort_with "Identity key is locked. Run: localvault keys unlock"
         return
       end
 
@@ -1045,7 +1070,7 @@ module LocalVault
         $stdout.puts "  [#{share["id"]}] vault '#{share["vault_name"]}' from @#{share["sender_handle"]}"
 
         begin
-          secrets = ShareCrypto.decrypt_from(share["encrypted_payload"], Identity.private_key_bytes)
+          secrets = ShareCrypto.decrypt_from(share["encrypted_payload"], my_private_key)
         rescue ShareCrypto::DecryptionError => e
           $stderr.puts "    Failed to decrypt: #{e.message}"
           next
@@ -1059,6 +1084,10 @@ module LocalVault
         passphrase = prompt_passphrase("    Passphrase for new vault '#{vault_name}': ")
         if passphrase.empty?
           $stderr.puts "    Skipped (empty passphrase)."
+          next
+        end
+        if (problem = PassphrasePolicy.check(passphrase))
+          $stderr.puts "    Skipped: #{problem}"
           next
         end
 
@@ -1632,6 +1661,11 @@ module LocalVault
       $stdout.puts "LocalVault doctor"
       $stdout.puts "Version: localvault #{VERSION}"
       $stdout.puts "Home: #{Config.root_path}"
+      if Identity.legacy?
+        $stdout.puts "Identity key: legacy (unprotected) — run: localvault keys protect"
+      elsif Identity.protected?
+        $stdout.puts "Identity key: passphrase-protected"
+      end
 
       if paths.empty?
         $stdout.puts "Executable selected by PATH: not found"
@@ -2139,6 +2173,25 @@ module LocalVault
       vault
     rescue ArgumentError, Crypto::DecryptionError
       nil
+    end
+
+    def config_session_ttl(action, value)
+      case action
+      when "get"
+        $stdout.puts "session-ttl: #{Config.session_ttl_hours}h"
+      when "set"
+        hours = Integer(value.to_s, exception: false)
+        unless hours && Config::SESSION_TTL_RANGE.cover?(hours)
+          return abort_with "Usage: localvault config set session-ttl HOURS (1–24)"
+        end
+        Config.session_ttl_hours = hours
+        $stdout.puts "session-ttl set to #{hours}h (applies to the next unlock)"
+      when "unset"
+        Config.session_ttl_hours = nil
+        $stdout.puts "session-ttl reset to #{Config.session_ttl_hours}h"
+      else
+        abort_with "Usage: localvault config [get|set|unset] session-ttl [HOURS]"
+      end
     end
 
     def sanitize_receive_vault_name(vault_name, sender_handle)

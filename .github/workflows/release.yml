@@ -104,7 +104,7 @@ jobs:
       - name: Smoke test
         run: |
           export LOCALVAULT_HOME=$(mktemp -d)
-          echo -e "testpass\ntestpass" | localvault init
+          echo -e "smoke-test-passphrase\nsmoke-test-passphrase" | localvault init
           echo "Smoke test passed: init works"
           rm -rf "$LOCALVAULT_HOME"
 
@@ -127,6 +127,6 @@ jobs:
 
           # Smoke test the gem-installed binary
           export LOCALVAULT_HOME=$(mktemp -d)
-          echo -e "testpass\ntestpass" | localvault init
+          echo -e "smoke-test-passphrase\nsmoke-test-passphrase" | localvault init
           echo "RubyGems smoke test passed"
           rm -rf "$LOCALVAULT_HOME"

@@ -333,13 +333,13 @@ class TeamRemoveSyncTest < Minitest::Test
   end
 
   def run_team_remove_rotate(handle, vault_name)
-    # Stub passphrase prompt to return "newpass" — `remove` is now a top-level
+    # Stub passphrase prompt to return "new-passphrase-ok" — `remove` is now a top-level
     # CLI command, so the prompt method lives on LocalVault::CLI. Wrap the
     # define_method in `no_commands` so Thor doesn't try to register the stub
     # as a CLI command.
     original = LocalVault::CLI.instance_method(:prompt_passphrase)
     LocalVault::CLI.no_commands do
-      LocalVault::CLI.send(:define_method, :prompt_passphrase) { |_msg = ""| "newpass" }
+      LocalVault::CLI.send(:define_method, :prompt_passphrase) { |_msg = ""| "new-passphrase-ok" }
     end
     LocalVault::ApiClient.stub(:new, @fake_client) do
       capture_io { LocalVault::CLI.start(["remove", handle, "--vault", vault_name, "--rotate"]) }

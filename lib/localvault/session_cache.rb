@@ -1,16 +1,18 @@
 require "base64"
 require "fileutils"
 require "open3"
+require "digest"
 
 module LocalVault
   # Caches derived master keys to avoid re-prompting passphrase on every command.
   #
-  # On macOS, uses the system Keychain (service "localvault", account = vault name).
-  # Falls back to file-based cache at +~/.localvault/.sessions/+ (mode 0600)
-  # when Keychain is unavailable (CI, sandboxed, Linux).
+  # On macOS, uses the system Keychain (service +keychain_service+, account =
+  # vault name). Falls back to a 0600 file when Keychain is unavailable (CI,
+  # sandboxed, Linux): +$XDG_RUNTIME_DIR/localvault/+ (per-user tmpfs, cleared
+  # at logout) when available, otherwise +~/.localvault/.sessions/+.
   #
-  # Entries expire after +DEFAULT_TTL_HOURS+ (8 hours). Expired entries are
-  # cleaned up on read.
+  # Entries expire after Config.session_ttl_hours (default 8, configurable
+  # 1–24). Expired entries are cleaned up on read.
   #
   # Stored payload format: +"<base64_key>|<expiry_unix_ts>"+
   #
@@ -51,9 +53,9 @@ module LocalVault
     #
     # @param vault_name [String] the vault name to cache
     # @param master_key [String] raw master key bytes to store
-    # @param ttl_hours [Integer] hours until expiry (default: 8)
+    # @param ttl_hours [Integer] hours until expiry (default: Config.session_ttl_hours)
     # @return [void]
-    def self.set(vault_name, master_key, ttl_hours: DEFAULT_TTL_HOURS)
+    def self.set(vault_name, master_key, ttl_hours: Config.session_ttl_hours)
       expiry  = Time.now.to_i + (ttl_hours * 3600).to_i
       payload = "#{Base64.strict_encode64(master_key)}|#{expiry}"
       keychain_set(vault_name, payload)
@@ -72,21 +74,43 @@ module LocalVault
     # @return [void]
     def self.clear_all
       Store.list_vaults.each { |name| clear(name) }
+      clear(Identity::CACHE_NAME)
+    end
+
+    # Keychain service name. The default home keeps "localvault" (unchanged
+    # for existing installs). A custom LOCALVAULT_HOME gets its own service, so
+    # two homes, including the test suite, never read each other's keys.
+    #
+    # @return [String]
+    def self.keychain_service
+      custom = ENV["LOCALVAULT_HOME"]
+      return KEYCHAIN_SERVICE if custom.nil? || custom.empty?
+
+      "#{KEYCHAIN_SERVICE}-#{Digest::SHA256.hexdigest(File.expand_path(custom))[0, 12]}"
+    end
+
+    # Directory for the file fallback, created 0700. Prefers the per-user
+    # runtime dir (tmpfs on Linux) so cached keys stay off persistent disk.
+    #
+    # @return [String]
+    def self.sessions_dir
+      custom  = ENV["LOCALVAULT_HOME"]
+      runtime = ENV["XDG_RUNTIME_DIR"]
+      dir = if custom && !custom.empty?
+              File.join(custom, ".sessions")
+            elsif runtime && !runtime.empty? && File.directory?(runtime)
+              File.join(runtime, "localvault")
+            else
+              File.join(File.expand_path("~/.localvault"), ".sessions")
+            end
+      FileUtils.mkdir_p(dir, mode: 0o700)
+      dir
     end
 
     private
 
     def self.macos?
       RUBY_PLATFORM.include?("darwin")
-    end
-
-    def self.sessions_dir
-      dir = File.join(
-        ENV.fetch("LOCALVAULT_HOME", File.expand_path("~/.localvault")),
-        ".sessions"
-      )
-      FileUtils.mkdir_p(dir, mode: 0o700)
-      dir
     end
 
     def self.session_file(vault_name)
@@ -96,7 +120,7 @@ module LocalVault
     def self.keychain_get(vault_name)
       if macos?
         out = run_command(
-          ["security", "find-generic-password", "-a", vault_name, "-s", KEYCHAIN_SERVICE, "-w"],
+          ["security", "find-generic-password", "-a", vault_name, "-s", keychain_service, "-w"],
           timeout: 2
         )
         return out unless out.nil? || out.empty?
@@ -112,7 +136,7 @@ module LocalVault
         success = system(
           "security", "add-generic-password",
           "-a", vault_name,
-          "-s", KEYCHAIN_SERVICE,
+          "-s", keychain_service,
           "-w", payload,
           out: File::NULL, err: File::NULL
         )
@@ -138,7 +162,7 @@ module LocalVault
         system(
           "security", "delete-generic-password",
           "-a", vault_name,
-          "-s", KEYCHAIN_SERVICE,
+          "-s", keychain_service,
           out: File::NULL, err: File::NULL
         )
       end

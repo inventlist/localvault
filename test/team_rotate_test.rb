@@ -89,7 +89,7 @@ class TeamRotateTest < Minitest::Test
 
   def run_rotate(vault_name)
     original = LocalVault::CLI::Team.instance_method(:prompt_passphrase)
-    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase) { |_msg = ""| "newpass" }
+    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase) { |_msg = ""| "new-passphrase-ok" }
     LocalVault::ApiClient.stub(:new, @fake_client) do
       capture_io { LocalVault::CLI.start(["team", "rotate", "--vault", vault_name]) }
     end
@@ -99,7 +99,7 @@ class TeamRotateTest < Minitest::Test
 
   def run_rotate_positional(vault_name)
     original = LocalVault::CLI::Team.instance_method(:prompt_passphrase)
-    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase) { |_msg = ""| "newpass" }
+    LocalVault::CLI::Team.send(:define_method, :prompt_passphrase) { |_msg = ""| "new-passphrase-ok" }
     LocalVault::ApiClient.stub(:new, @fake_client) do
       capture_io { LocalVault::CLI.start(["team", "rotate", vault_name]) }
     end

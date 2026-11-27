@@ -198,7 +198,7 @@ class CLITest < Minitest::Test
   # --- init ---
 
   def test_init_creates_default_vault
-    stub_passphrase("secret123") do
+    stub_passphrase("secret123-long-enough") do
       out, = capture_io { LocalVault::CLI.start(%w[init]) }
       assert_match(/Vault 'default' created/, out)
       assert LocalVault::Store.new("default").exists?
@@ -206,7 +206,7 @@ class CLITest < Minitest::Test
   end
 
   def test_init_creates_named_vault
-    stub_passphrase("secret123") do
+    stub_passphrase("secret123-long-enough") do
       out, = capture_io { LocalVault::CLI.start(%w[init staging]) }
       assert_match(/Vault 'staging' created/, out)
       assert LocalVault::Store.new("staging").exists?
@@ -222,7 +222,7 @@ class CLITest < Minitest::Test
 
   def test_init_rejects_mismatched_confirmation
     call_count = 0
-    passphrases = ["secret123", "wrong456"]
+    passphrases = ["secret123-long-enough", "wrong456"]
     stub_getpass(-> { passphrases[call_count].tap { call_count += 1 } }) do
       _, err = capture_io { LocalVault::CLI.start(%w[init]) }
       assert_match(/Passphrases do not match/, err)
@@ -231,7 +231,7 @@ class CLITest < Minitest::Test
 
   def test_init_errors_if_vault_exists
     create_test_vault("default")
-    stub_passphrase("secret123") do
+    stub_passphrase("secret123-long-enough") do
       _, err = capture_io { LocalVault::CLI.start(%w[init]) }
       assert_match(/already exists/, err)
     end
@@ -940,7 +940,7 @@ class CLITest < Minitest::Test
     vault.set("DB_URL",  "postgres://localhost/myapp")
 
     call_count = 0
-    inputs = [test_passphrase, "newpass", "newpass"]
+    inputs = [test_passphrase, "new-passphrase-ok", "new-passphrase-ok"]
     stub_rekey_inputs(inputs) do
       out, = capture_io { LocalVault::CLI.start(%w[rekey]) }
       assert_match(/Passphrase updated/, out)
@@ -952,14 +952,14 @@ class CLITest < Minitest::Test
     end
 
     # new passphrase works and secrets preserved
-    new_vault = LocalVault::Vault.open(name: "default", passphrase: "newpass")
+    new_vault = LocalVault::Vault.open(name: "default", passphrase: "new-passphrase-ok")
     assert_equal "sk-abc123",           new_vault.get("API_KEY")
     assert_equal "postgres://localhost/myapp", new_vault.get("DB_URL")
   end
 
   def test_rekey_rejects_wrong_current_passphrase
     create_test_vault("default")
-    inputs = ["wrongpass", "newpass", "newpass"]
+    inputs = ["wrongpass", "new-passphrase-ok", "new-passphrase-ok"]
     stub_rekey_inputs(inputs) do
       _, err = capture_io { LocalVault::CLI.start(%w[rekey]) }
       assert_match(/Wrong passphrase/, err)
@@ -977,7 +977,7 @@ class CLITest < Minitest::Test
 
   def test_rekey_rejects_mismatched_new_passphrase
     create_test_vault("default")
-    inputs = [test_passphrase, "newpass", "different"]
+    inputs = [test_passphrase, "new-passphrase-ok", "different"]
     stub_rekey_inputs(inputs) do
       _, err = capture_io { LocalVault::CLI.start(%w[rekey]) }
       assert_match(/Passphrases do not match/, err)
@@ -988,13 +988,13 @@ class CLITest < Minitest::Test
     vault = create_test_vault("staging")
     vault.set("TOKEN", "tok-xyz")
 
-    inputs = [test_passphrase, "newpass", "newpass"]
+    inputs = [test_passphrase, "new-passphrase-ok", "new-passphrase-ok"]
     stub_rekey_inputs(inputs) do
       out, = capture_io { LocalVault::CLI.start(%w[rekey staging]) }
       assert_match(/Passphrase updated/, out)
     end
 
-    new_vault = LocalVault::Vault.open(name: "staging", passphrase: "newpass")
+    new_vault = LocalVault::Vault.open(name: "staging", passphrase: "new-passphrase-ok")
     assert_equal "tok-xyz", new_vault.get("TOKEN")
   end
 
@@ -1085,20 +1085,20 @@ class CLITest < Minitest::Test
     vault.set("SECRET", "gone")
 
     call_count = 0
-    inputs = ["default", "newpass", "newpass"]
+    inputs = ["default", "new-passphrase-ok", "new-passphrase-ok"]
     stub_reset_inputs(inputs) do
       out, = capture_io { LocalVault::CLI.start(%w[reset]) }
       assert_match(/Vault 'default' has been reset/, out)
     end
 
-    new_vault = LocalVault::Vault.open(name: "default", passphrase: "newpass")
+    new_vault = LocalVault::Vault.open(name: "default", passphrase: "new-passphrase-ok")
     assert_nil new_vault.get("SECRET")
   end
 
   def test_reset_requires_vault_name_confirmation
     create_test_vault("default")
 
-    inputs = ["wrong", "newpass", "newpass"]
+    inputs = ["wrong", "new-passphrase-ok", "new-passphrase-ok"]
     stub_reset_inputs(inputs) do
       _, err = capture_io { LocalVault::CLI.start(%w[reset]) }
       assert_match(/Cancelled/, err)
@@ -1114,7 +1114,7 @@ class CLITest < Minitest::Test
   def test_reset_named_vault
     create_test_vault("staging")
 
-    inputs = ["staging", "newpass", "newpass"]
+    inputs = ["staging", "new-passphrase-ok", "new-passphrase-ok"]
     stub_reset_inputs(inputs) do
       out, = capture_io { LocalVault::CLI.start(%w[reset staging]) }
       assert_match(/Vault 'staging' has been reset/, out)
@@ -1145,7 +1145,7 @@ class CLITest < Minitest::Test
     vault = create_test_vault("default")
     vault.set("KEEP_ME", "important_data")
 
-    inputs = ["default", "first-pass", "second-pass"]
+    inputs = ["default", "first-passphrase", "second-passphrase"]
     stub_reset_inputs(inputs) do
       _, err = capture_io { LocalVault::CLI.start(%w[reset]) }
       assert_match(/do not match/i, err)

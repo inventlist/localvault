@@ -21,6 +21,7 @@
     { "id": "14", "file": "14-mcp-first-localvault.md", "type": "journey" },
     { "id": "15", "file": "15-scoped-env-injection.md", "type": "doc" },
     { "id": "16", "file": "16-safe-stdin-writes-and-doctor.md", "type": "journey" },
-    { "id": "17", "file": "17-when-guidance-is-not-enough.md", "type": "journey" }
+    { "id": "17", "file": "17-when-guidance-is-not-enough.md", "type": "journey" },
+    { "id": "18", "file": "18-the-key-we-forgot-to-lock.md", "type": "journey" }
   ]
 }
