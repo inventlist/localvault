@@ -94,6 +94,8 @@ LocalVault also refuses to start without libsodium. There's no weaker fallback t
 
 ## What to run
 
+These commands arrive in the next LocalVault release. Once you've upgraded:
+
 ```bash
 localvault keys status     # protected, locked, or legacy?
 localvault keys protect    # seal an older key (or change its passphrase)
