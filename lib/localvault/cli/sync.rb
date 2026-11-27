@@ -3,11 +3,13 @@ require "fileutils"
 require "digest"
 require "io/console"
 require_relative "team_helpers"
+require_relative "identity_prompts"
 
 module LocalVault
   class CLI
     class Sync < Thor
       include LocalVault::CLI::TeamHelpers
+      include LocalVault::CLI::IdentityPrompts
 
       desc "all", "Sync all vaults bidirectionally (push local changes, pull remote changes)"
       method_option :dry_run, type: :boolean, default: false, desc: "Show what would happen without making changes"
@@ -537,7 +539,10 @@ module LocalVault
         slot = key_slots[handle]
         return false unless slot.is_a?(Hash) && slot["enc_key"].is_a?(String)
 
-        decrypted_key = KeySlot.decrypt(slot["enc_key"], Identity.private_key_bytes)
+        my_private_key = identity_private_key
+        return false unless my_private_key
+
+        decrypted_key = KeySlot.decrypt(slot["enc_key"], my_private_key)
 
         if slot["scopes"].is_a?(Array) && slot["blob"].is_a?(String)
           blob_encrypted = Base64.strict_decode64(slot["blob"])

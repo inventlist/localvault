@@ -255,6 +255,10 @@ module LocalVault
             $stderr.puts "Error: Passphrase cannot be empty."
             return
           end
+          if (problem = PassphrasePolicy.check(passphrase))
+            $stderr.puts "Error: #{problem}"
+            return
+          end
 
           # Decrypt with the CURRENT master key. After this point we must
           # not touch the store until the push has succeeded — see
