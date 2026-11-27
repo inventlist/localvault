@@ -35,11 +35,15 @@ class CLIIdentityTest < Minitest::Test
 
   def setup
     setup_test_home
+    # Plan 13: keygen/login now ask for an identity passphrase.
+    @identity_prompt_originals = [LocalVault::CLI, LocalVault::CLI::Keys].to_h { |k| [k, k.instance_method(:prompt_passphrase)] }
+    @identity_prompt_originals.each_key { |k| k.send(:define_method, :prompt_passphrase) { |_msg = ""| "identity-passphrase-ok" } }
     LocalVault::Config.ensure_directories!
     @fake_client = FakeIdentityApiClient.new
   end
 
   def teardown
+    @identity_prompt_originals&.each { |k, m| k.send(:define_method, :prompt_passphrase, m) }
     teardown_test_home
   end
 

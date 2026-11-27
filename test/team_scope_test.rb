@@ -291,7 +291,7 @@ class TeamScopeTest < Minitest::Test
 
     original_secrets = LocalVault::Store.new("production").read_encrypted
 
-    stub_team_prompt("fresh-pass") do
+    stub_team_prompt("fresh-passphrase") do
       LocalVault::ApiClient.stub(:new, @fake_client) do
         out, = capture_io { LocalVault::CLI.start(%w[team rotate production]) }
         assert_match(/re-encrypted/i, out)
@@ -302,7 +302,7 @@ class TeamScopeTest < Minitest::Test
                  "ciphertext should be rotated after successful push"
 
     # New passphrase works, old one doesn't
-    new_vault = LocalVault::Vault.open(name: "production", passphrase: "fresh-pass")
+    new_vault = LocalVault::Vault.open(name: "production", passphrase: "fresh-passphrase")
     assert_equal "sk_live_demo_stripe", new_vault.get("STRIPE_KEY")
 
     # Pushed blob contains new slots for both members
@@ -323,7 +323,7 @@ class TeamScopeTest < Minitest::Test
     )
     @fake_client.set_pull_response(blob)
 
-    stub_team_prompt("fresh-pass") do
+    stub_team_prompt("fresh-passphrase") do
       LocalVault::ApiClient.stub(:new, @fake_client) do
         out, = capture_io { LocalVault::CLI.start(%w[team rotate production]) }
         assert_match(/re-encrypted/i, out)
