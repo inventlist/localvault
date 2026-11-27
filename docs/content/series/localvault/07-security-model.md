@@ -68,7 +68,7 @@ When vault sync is enabled:
 
 Your X25519 identity private key lives in `~/.localvault/keys/identity.priv` (mode 0600), **encrypted with an identity passphrase**: Argon2id derives a key, XSalsa20-Poly1305 seals the private key. The file is a small JSON envelope carrying the salt and the Argon2id parameters, so they can be raised later.
 
-This arrives in the next release. Earlier versions store the private key as plain base64, protected only by the `0600` file permission ([why we changed it](https://localvault.kuickr.co/the-key-we-forgot-to-lock.md)).
+This arrived in LocalVault 1.16.0. Earlier versions store the private key as plain base64, protected only by the `0600` file permission ([why we changed it](https://localvault.kuickr.co/the-key-we-forgot-to-lock.md)).
 
 The identity passphrase is separate from your vault passphrases, because this one key unlocks the key slots of every vault shared with you.
 
